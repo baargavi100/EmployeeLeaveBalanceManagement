@@ -1,17 +1,22 @@
 package com.example.notificationservice.repository;
 
-import com.example.notificationservice.entity.LeaveAllocation;
-import org.springframework.data.jpa.repository.JpaRepository;
-
 import java.util.List;
-import java.util.Optional;
 
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import com.example.notificationservice.entity.LeaveAllocation;
+
+@Repository
 public interface LeaveAllocationRepository extends JpaRepository<LeaveAllocation, Long> {
+
+    /**
+     * Find all allocations for employee in a year
+     */
     List<LeaveAllocation> findByEmployeeIdAndYear(Long employeeId, Integer year);
-
-    Optional<LeaveAllocation> findByEmployeeIdAndLeaveCategoryAndYear(
-            Long employeeId, String category, Integer year);
-
-    // Get all allocations for a specific year (for year-end processing)
-    List<LeaveAllocation> findByYear(Integer year);
+    
+    /**
+     * Check if allocation exists for employee, year, and category
+     */
+    boolean existsByEmployeeIdAndYearAndLeaveCategory(Long employeeId, Integer year, String leaveCategory);
 }

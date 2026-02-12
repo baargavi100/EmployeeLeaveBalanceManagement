@@ -4,7 +4,6 @@ import com.example.notificationservice.enums.HalfDayType;
 import com.example.notificationservice.enums.LeaveStatus;
 import com.example.notificationservice.enums.LeaveType;
 import jakarta.persistence.*;
-import org.antlr.v4.runtime.misc.NotNull;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -19,7 +18,7 @@ public class LeaveApplication {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @NotNull
+    @Column(nullable = false)
     private Long employeeId;
 
     @Enumerated(EnumType.STRING)
@@ -28,14 +27,14 @@ public class LeaveApplication {
     @Enumerated(EnumType.STRING)
     private HalfDayType halfDayType ;
 
-    @NotNull
+    @Column(name = "\"year\"", nullable = false)
     private Integer year;
 
 
-    @NotNull
+    @Column(nullable = false)
     private LocalDate startDate;
 
-    @NotNull
+    @Column(nullable = false)
     private LocalDate endDate;
 
     private BigDecimal days;
@@ -43,7 +42,7 @@ public class LeaveApplication {
     @Enumerated(EnumType.STRING)
     private LeaveStatus status = LeaveStatus.PENDING;
 
-    @NotNull
+    @Column(nullable = false)
     private String reason;
 
     @OneToMany(mappedBy = "leaveApplication",

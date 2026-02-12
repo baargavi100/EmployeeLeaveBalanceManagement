@@ -1,31 +1,39 @@
+// ═══════════════════════════════════════════════════════════════════
+// FIXED DashboardController.java
+// Copy to: src/main/java/com/example/notificationservice/controller/
+// ═══════════════════════════════════════════════════════════════════
+
 package com.example.notificationservice.controller;
 
 import com.example.notificationservice.dto.EmployeeDashboardResponse;
-import com.example.notificationservice.dto.MonthlyStatsResponse;
-import com.example.notificationservice.dto.TeamMemberBalance;
+import com.example.notificationservice.dto.response.MonthlyStatsResponse;
 import com.example.notificationservice.service.DashboardService;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
-
 @RestController
-@RequestMapping("/api/dashboard")
-
+@RequestMapping("/employee")
+@CrossOrigin(origins = "*")
 public class DashboardController {
 
     private final DashboardService dashboardService;
 
-    public DashboardController(DashboardService dashboardService){
-        this.dashboardService=dashboardService;
+    public DashboardController(DashboardService dashboardService) {
+        this.dashboardService = dashboardService;
     }
 
-    @GetMapping("/employee/{employeeId}")
-    public EmployeeDashboardResponse getDashboard(
-            @PathVariable Long employeeId) {
+    /**
+     * Get employee dashboard - full overview
+     * GET /employee/{employeeId}
+     */
+    @GetMapping("/{employeeId}")
+    public EmployeeDashboardResponse getDashboard(@PathVariable Long employeeId) {
         return dashboardService.getDashboard(employeeId);
     }
 
-
+    /**
+     * Get monthly statistics for employee
+     * GET /monthly-stats/{employeeId}?year=2025&month=1
+     */
     @GetMapping("/monthly-stats/{employeeId}")
     public MonthlyStatsResponse getMonthlyStats(
             @PathVariable Long employeeId,
@@ -34,19 +42,4 @@ public class DashboardController {
     ) {
         return dashboardService.getMonthlyStats(employeeId, year, month);
     }
-
-    @GetMapping("/team-balances/{managerId}")
-    public List<TeamMemberBalance> getTeamBalances(
-            @PathVariable Long managerId,
-            @RequestParam Integer year
-    ) {
-        return dashboardService.getTeamBalances(managerId, year);
-    }
-
-    @GetMapping("/pending-count/{managerId}")
-    public int getPendingCount(@PathVariable Long managerId) {
-        return dashboardService.getPendingCount(managerId);
-    }
-
-
 }

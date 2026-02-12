@@ -8,16 +8,16 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 /**
- * Entity: Loss of Pay Record
- * Purpose: Track monthly loss of pay (1% per excess day)
- * Table: loss_of_pay_record
+ * Entity: Carry Forward Balance
+ * Purpose: Store common carry forward pool (not tied to leave category)
+ * Table: carry_forward_balance
  */
 @Entity
-@Table(name = "loss_of_pay_record")
+@Table(name = "carry_forward_balance")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class LossOfPayRecord {
+public class CarryForwardBalance {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -29,29 +29,20 @@ public class LossOfPayRecord {
     @Column(name = "\"year\"", nullable = false)
     private Integer year;
 
-    @Column(name = "\"month\"", nullable = false)
-    private Integer month;
+    @Column(name = "total_carried_forward", nullable = false)
+    private Double totalCarriedForward = 0.0;
 
-    @Column(name = "excess_days", nullable = false)
-    private Double excessDays = 0.0;
+    @Column(name = "total_used", nullable = false)
+    private Double totalUsed = 0.0;
 
-    @Column(name = "loss_percentage", nullable = false)
-    private Double lossPercentage = 0.0;
+    @Column(name = "remaining", nullable = false)
+    private Double remaining = 0.0;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
-    @Column(name = "violation_count")
-    private Integer violationCount = 0;
-
-    @Column(name = "reason")
-    private String reason;
-
-    @Column(name = "lop_percentage")
-    private Double lopPercentage = 0.0;
-
 
     @PrePersist
     protected void onCreate() {
