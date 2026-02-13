@@ -1,9 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════
 // FILE: MonthlyStatsResponse.java
-// Location: src/main/java/com/example/notificationservice/dto/response/
+// Location: src/main/java/com/example/notificationservice/dto/
 // ═══════════════════════════════════════════════════════════════════
 
-package com.example.notificationservice.dto.response;
+package com.example.notificationservice.dto;
 
 import java.util.List;
 

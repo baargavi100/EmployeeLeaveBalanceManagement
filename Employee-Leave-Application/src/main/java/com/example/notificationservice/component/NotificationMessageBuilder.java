@@ -4,8 +4,6 @@ import com.example.notificationservice.dto.EmailMessage;
 import com.example.notificationservice.enums.EventType;
 import org.springframework.stereotype.Component;
 
-import java.util.Map;
-
 @Component
 public class NotificationMessageBuilder {
 

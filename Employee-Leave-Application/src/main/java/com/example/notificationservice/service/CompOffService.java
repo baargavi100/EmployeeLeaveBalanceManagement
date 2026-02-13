@@ -1,160 +1,137 @@
+// ═══════════════════════════════════════════════════════════════════
+// FILE: CompOffService.java
+// Location: src/main/java/com/example/notificationservice/service/
+// ═══════════════════════════════════════════════════════════════════
+
 package com.example.notificationservice.service;
 
-import com.example.notificationservice.component.HolidayChecker;
-import com.example.notificationservice.dto.CompOffRequestDTO;
-import com.example.notificationservice.entity.CompOff;
-import com.example.notificationservice.enums.CompOffStatus;
-import com.example.notificationservice.exceptions.BadRequestException;
-import com.example.notificationservice.repository.CompOffRepository;
+import com.example.notificationservice.entity.CompOffBalance;
+import com.example.notificationservice.repository.CompOffBalanceRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.util.List;
 
 @Service
+@RequiredArgsConstructor
+@Slf4j
 public class CompOffService {
 
-    private final CompOffRepository compOffRepository;
-    private final HolidayChecker holidayChecker;
-    private final CompOffBalanceService balanceService;
+    private final CompOffBalanceRepository compOffRepository;
 
-
-    public CompOffService(CompOffRepository compOffRepository,
-                          HolidayChecker holidayChecker,
-                          CompOffBalanceService balanceService ) {
-        this.compOffRepository = compOffRepository;
-        this.holidayChecker = holidayChecker;
-        this.balanceService=balanceService;
-    }
+    // ═══════════════════════════════════════════════════════════════
+    // GET AVAILABLE COMP-OFF BALANCE
+    // ═══════════════════════════════════════════════════════════════
 
     /**
-     * 1️⃣ REQUEST BULK COMPOFF
-     * Handles both Admin (Auto-Approved) and Employee (Pending) requests.
+     * Get available comp-off balance for employee
      */
-    @Transactional
-    public void requestBulkCompOff(CompOffRequestDTO request, boolean isAdmin) {
-        if (request.getEmployeeId() == null) {
-            throw new BadRequestException("Employee ID is required");
-        }
-
-        for (CompOffRequestDTO.CompOffEntry entry : request.getEntries()) {
-            // Validate that workedDate is a non-working day
-            if (!holidayChecker.isNonWorkingDay(entry.getWorkedDate())) {
-                throw new BadRequestException("Date " + entry.getWorkedDate() + " is not a holiday/weekend.");
-            }
-
-            // Prevent duplicate banking for the same worked date
-            if (compOffRepository.existsByEmployeeIdAndWorkedDate(request.getEmployeeId(), entry.getWorkedDate())) {
-                throw new BadRequestException("Comp-Off already banked for date: " + entry.getWorkedDate());
-            }
-
-            CompOff compOff = new CompOff();
-            compOff.setEmployeeId(request.getEmployeeId());
-            compOff.setWorkedDate(entry.getWorkedDate());
-            compOff.setPlannedLeaveDate(entry.getPlannedLeaveDate());
-
-            // Safety check for days: default to 1 if 0 or null
-            BigDecimal daysCount = (entry.getDays() <= 0) ? BigDecimal.ONE : BigDecimal.valueOf(entry.getDays());
-            compOff.setDays(daysCount);
-
-            // ✅ LOGIC FIX: Admin entries go straight to EARNED, Employees stay PENDING
-            compOff.setStatus(isAdmin ? CompOffStatus.EARNED : CompOffStatus.PENDING);
-
-            compOffRepository.save(compOff);
-        }
-    }
-
-    /**
-     * 2️⃣ APPROVE COMPOFF
-     * Manual gatekeeper for employee requests.
-     */
-    @Transactional
-    public void approveCompOff(Long id) {
-        CompOff compOff = compOffRepository.findById(id)
-                .orElseThrow(() -> new BadRequestException("CompOff record not found"));
-
-        if (compOff.getStatus() != CompOffStatus.PENDING) {
-            throw new BadRequestException("Only PENDING requests can be approved.");
-        }
-
-        compOff.setStatus(CompOffStatus.EARNED);
-        compOffRepository.save(compOff);
-
-        balanceService.addEarned(
-                compOff.getEmployeeId(),
-                compOff.getDays()
-        );
-    }
-
-
-    /**
-     * 3️⃣ CHECK BALANCE (Earned - Used)
-     * Note: PENDING records do not count toward available balance.
-     */
+    @Transactional(readOnly = true)
     public BigDecimal getAvailableCompOffDays(Long employeeId) {
-        if (employeeId == null) return BigDecimal.ZERO;
 
-        BigDecimal earned = compOffRepository.sumDaysByEmployeeAndStatus(employeeId, CompOffStatus.EARNED);
-        BigDecimal used = compOffRepository.sumDaysByEmployeeAndStatus(employeeId, CompOffStatus.USED);
-
-        earned = (earned != null) ? earned : BigDecimal.ZERO;
-        used = (used != null) ? used : BigDecimal.ZERO;
-
-        return earned.subtract(used);
+        Double total = compOffRepository.getTotalAvailableBalance(employeeId);
+        return BigDecimal.valueOf(total != null ? total : 0.0);
     }
 
     /**
-     * 4️⃣ USE COMPOFF (FIFO Deduction)
-     * Deducts from EARNED records and handles splitting if leave is partial.
+     * Get comp-off balance for specific year
      */
-    @Transactional
-    public void restoreCompOffBalance(Long employeeId, BigDecimal days) {
-        balanceService.restoreUsed(employeeId, days);
+    @Transactional(readOnly = true)
+    public CompOffBalance getBalanceForYear(Long employeeId, Integer year) {
+        return compOffRepository.findByEmployeeIdAndYear(employeeId, year)
+                .orElse(null);
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // EARN COMP-OFF DAYS
+    // ═══════════════════════════════════════════════════════════════
 
+    /**
+     * Add earned comp-off days for employee
+     */
     @Transactional
-    public void useCompOff(Long employeeId, BigDecimal daysToDeduct, Long leaveApplicationId) {
-        BigDecimal remaining = daysToDeduct;
+    public void earnCompOff(Long employeeId, Integer year, Double days) {
 
-        // FIFO: Always use the oldest earned credits first
-        List<CompOff> earnedList = compOffRepository.findByEmployeeIdAndStatusOrderByWorkedDateAsc(employeeId, CompOffStatus.EARNED);
+        log.info("💰 [COMPOFF] Earning comp-off: employee={}, year={}, days={}",
+                employeeId, year, days);
 
-        for (CompOff compOff : earnedList) {
-            if (remaining.compareTo(BigDecimal.ZERO) <= 0) break;
+        CompOffBalance balance = compOffRepository
+                .findByEmployeeIdAndYear(employeeId, year)
+                .orElse(new CompOffBalance());
 
-            BigDecimal available = compOff.getDays();
+        balance.setEmployeeId(employeeId);
+        balance.setYear(year);
+        balance.setEarned(balance.getEarned() + days);
+        balance.calculateBalance();
 
-            if (available.compareTo(remaining) <= 0) {
-                // Scenario A: Record is smaller than or equal to needed leave
-                compOff.setStatus(CompOffStatus.USED);
-                compOff.setUsedLeaveApplicationId(leaveApplicationId);
-                remaining = remaining.subtract(available);
-                compOffRepository.save(compOff);
-            } else {
-                // Scenario B: Split logic - Create a new EARNED record for the leftover balance
-                CompOff leftover = new CompOff();
-                leftover.setEmployeeId(employeeId);
-                leftover.setWorkedDate(compOff.getWorkedDate());
-                leftover.setPlannedLeaveDate(compOff.getPlannedLeaveDate());
-                leftover.setDays(available.subtract(remaining));
-                leftover.setStatus(CompOffStatus.EARNED);
-                compOffRepository.save(leftover);
+        compOffRepository.save(balance);
 
-                // Mark current record as USED for the 'remaining' amount
-                compOff.setDays(remaining);
-                compOff.setStatus(CompOffStatus.USED);
-                compOff.setUsedLeaveApplicationId(leaveApplicationId);
-                compOffRepository.save(compOff);
+        log.info("✅ [COMPOFF] Earned {} days. New balance: {}",
+                days, balance.getBalance());
+    }
 
-                remaining = BigDecimal.ZERO;
-            }
+    // ═══════════════════════════════════════════════════════════════
+    // USE COMP-OFF DAYS
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Use comp-off days (deduct from balance)
+     * Returns actual days used (cannot go negative)
+     */
+    @Transactional
+    public double useCompOff(Long employeeId, Integer year, Double daysRequested) {
+
+        log.info("📤 [COMPOFF] Using comp-off: employee={}, year={}, requested={}",
+                employeeId, year, daysRequested);
+
+        CompOffBalance balance = compOffRepository
+                .findByEmployeeIdAndYear(employeeId, year)
+                .orElseThrow(() -> new RuntimeException(
+                        "No comp-off balance found for employee: " + employeeId));
+
+        if (balance.getBalance() < daysRequested) {
+            throw new RuntimeException(
+                    "Insufficient comp-off balance. Available: " + balance.getBalance() +
+                            ", Requested: " + daysRequested);
         }
 
-        if (remaining.compareTo(BigDecimal.ZERO) > 0) {
-            throw new BadRequestException("Insufficient balance to deduct " + daysToDeduct + " days.");
-        }
-        balanceService.addUsed(employeeId, daysToDeduct);
+        balance.setUsed(balance.getUsed() + daysRequested);
+        balance.calculateBalance();
+
+        compOffRepository.save(balance);
+
+        log.info("✅ [COMPOFF] Used {} days. Remaining: {}",
+                daysRequested, balance.getBalance());
+
+        return daysRequested;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // RESTORE COMP-OFF (When leave cancelled/rejected)
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Restore comp-off days (when leave is cancelled/rejected)
+     */
+    @Transactional
+    public void restoreCompOff(Long employeeId, Integer year, Double days) {
+
+        log.info("🔄 [COMPOFF] Restoring comp-off: employee={}, year={}, days={}",
+                employeeId, year, days);
+
+        CompOffBalance balance = compOffRepository
+                .findByEmployeeIdAndYear(employeeId, year)
+                .orElseThrow(() -> new RuntimeException(
+                        "No comp-off balance found for employee: " + employeeId));
+
+        balance.setUsed(Math.max(balance.getUsed() - days, 0.0));
+        balance.calculateBalance();
+
+        compOffRepository.save(balance);
+
+        log.info("✅ [COMPOFF] Restored {} days. New balance: {}",
+                days, balance.getBalance());
     }
 }

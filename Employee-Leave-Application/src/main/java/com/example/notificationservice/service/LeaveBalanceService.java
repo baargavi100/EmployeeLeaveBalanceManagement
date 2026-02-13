@@ -1,5 +1,11 @@
+// ═══════════════════════════════════════════════════════════════════
+// FILE: LeaveBalanceService.java (REFACTORED - Complete Balance Logic)
+// Location: src/main/java/com/example/notificationservice/service/
+// ═══════════════════════════════════════════════════════════════════
+
 package com.example.notificationservice.service;
 
+import com.example.notificationservice.constants.PolicyConstants;
 import com.example.notificationservice.dto.LeaveBalanceResponse;
 import com.example.notificationservice.dto.LeaveTypeBreakdown;
 import com.example.notificationservice.entity.*;
@@ -22,57 +28,87 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true)
 public class LeaveBalanceService {
 
-    // ===== REPOSITORIES =====
-    private final CarryForwardBalanceRepository carryForwardBalanceRepository;
     private final EmployeeRepository employeeRepository;
     private final LeaveAllocationRepository allocationRepository;
     private final LeaveApplicationRepository leaveApplicationRepository;
+    private final CarryForwardBalanceRepository carryForwardBalanceRepository;
+    private final CompOffBalanceRepository compOffBalanceRepository;
     private final LossOfPayRecordRepository lossOfPayRecordRepository;
-    private final CompOffService compOffService;
 
-    // ===== BUSINESS CONSTANTS =====
-    private static final double MONTHLY_ALLOCATED = 2.0;
-    private static final double MAX_CARRY_FORWARD = 5.0;
-    private static final double LOSS_OF_PAY_INCREMENT = 1.0;
+    // ═══════════════════════════════════════════════════════════════
+    // GET COMPLETE LEAVE BALANCE
+    // ═══════════════════════════════════════════════════════════════
 
-    // =====================================================
-    // READ: DASHBOARD / BALANCE (EXISTING CODE - KEPT AS IS)
-    // =====================================================
+    /**
+     * Get complete leave balance for employee
+     *
+     * Calculation Rules:
+     * - Total Allocated = 24 days (VACATION:8 + SICK:6 + CASUAL:6 + PERSONAL:4)
+     * - CompOff is NOT allocated, it's EARNED separately
+     * - Carry Forward is stored in separate table
+     * - LOP comes from monthly violations
+     */
     public LeaveBalanceResponse getBalance(Long employeeId, Integer year) {
 
+        log.info("📊 [BALANCE] Getting balance for employee: {}, year: {}", employeeId, year);
+
+        // ═══════════════════════════════════════════════════════════
+        // 1. GET EMPLOYEE
+        // ═══════════════════════════════════════════════════════════
+
         Employee employee = employeeRepository.findById(employeeId)
-                .orElseThrow(() -> new RuntimeException("Employee not found"));
+                .orElseThrow(() -> new RuntimeException("Employee not found: " + employeeId));
+
+        // ═══════════════════════════════════════════════════════════
+        // 2. GET ALLOCATIONS (VACATION, SICK, CASUAL, PERSONAL only)
+        // ═══════════════════════════════════════════════════════════
 
         List<LeaveAllocation> allocations =
                 allocationRepository.findByEmployeeIdAndYear(employeeId, year);
 
+        double totalAllocated = allocations.stream()
+                .mapToDouble(LeaveAllocation::getAllocatedDays)
+                .sum();
+
+        log.info("   Total Allocated: {} days", totalAllocated);
+
+        // ═══════════════════════════════════════════════════════════
+        // 3. GET APPROVED LEAVES (Calculate total used)
+        // ═══════════════════════════════════════════════════════════
+
         List<LeaveApplication> approvedLeaves =
                 leaveApplicationRepository.findByEmployeeIdAndStatusAndYear(
-                        employeeId, LeaveStatus.APPROVED, year
-                );
+                        employeeId, LeaveStatus.APPROVED, year);
 
-        Map<LeaveType, List<LeaveApplication>> byType =
-                approvedLeaves.stream()
-                        .collect(Collectors.groupingBy(LeaveApplication::getLeaveType));
+        // Group by leave type for breakdown
+        Map<LeaveType, List<LeaveApplication>> byType = approvedLeaves.stream()
+                .collect(Collectors.groupingBy(LeaveApplication::getLeaveType));
+
+        double totalUsed = approvedLeaves.stream()
+                .filter(l -> l.getLeaveType() != LeaveType.COMP_OFF) // Don't count COMP_OFF in regular usage
+                .mapToDouble(l -> l.getDays().doubleValue())
+                .sum();
+
+        log.info("   Total Used (excluding COMP_OFF): {} days", totalUsed);
+
+        // ═══════════════════════════════════════════════════════════
+        // 4. BUILD LEAVE TYPE BREAKDOWN
+        // ═══════════════════════════════════════════════════════════
 
         List<LeaveTypeBreakdown> breakdown = new ArrayList<>();
-        double totalAllocated = 0;
-        double totalUsed = 0;
 
         for (LeaveAllocation alloc : allocations) {
 
             LeaveType type = LeaveType.valueOf(alloc.getLeaveCategory());
+            double allocated = alloc.getAllocatedDays();
 
-            // NOTE: getCarriedForwardDays() now always returns 0.0
-            // Carry forward is stored separately in carry_forward_balance table
-            double allocated = alloc.getAllocatedDays() + alloc.getCarriedForwardDays();
-
+            // Calculate used for this type
             double used = byType.getOrDefault(type, List.of())
                     .stream()
-                    .map(LeaveApplication::getDays)
-                    .mapToDouble(BigDecimal::doubleValue)
+                    .mapToDouble(l -> l.getDays().doubleValue())
                     .sum();
 
+            // Count half days
             long halfDays = byType.getOrDefault(type, List.of())
                     .stream()
                     .filter(l -> l.getDays().compareTo(new BigDecimal("0.5")) == 0)
@@ -85,30 +121,102 @@ public class LeaveBalanceService {
                     allocated - used,
                     (int) halfDays
             ));
-
-            totalAllocated += allocated;
-            totalUsed += used;
         }
 
-        BigDecimal compOffBalance = compOffService.getAvailableCompOffDays(employeeId);
+        // ═══════════════════════════════════════════════════════════
+        // 5. GET COMP-OFF BALANCE (Earned, not allocated)
+        // ═══════════════════════════════════════════════════════════
 
+        CompOffBalance compOffBalance = compOffBalanceRepository
+                .findByEmployeeIdAndYear(employeeId, year)
+                .orElse(null);
+
+        double compOffEarned = 0.0;
+        double compOffUsed = 0.0;
+        double compOffAvailable = 0.0;
+
+        if (compOffBalance != null) {
+            compOffEarned = compOffBalance.getEarned();
+            compOffUsed = compOffBalance.getUsed();
+            compOffAvailable = compOffBalance.getBalance();
+        }
+
+        // Add COMP_OFF to breakdown
         breakdown.add(new LeaveTypeBreakdown(
                 LeaveType.COMP_OFF,
-                compOffBalance.doubleValue(),
-                0.0,
-                compOffBalance.doubleValue(),
+                compOffEarned,
+                compOffUsed,
+                compOffAvailable,
                 0
         ));
 
-        double remaining = totalAllocated - totalUsed;
+        log.info("   CompOff Balance: Earned={}, Used={}, Available={}",
+                compOffEarned, compOffUsed, compOffAvailable);
+
+        // ═══════════════════════════════════════════════════════════
+        // 6. GET CARRY FORWARD BALANCE
+        // ═══════════════════════════════════════════════════════════
+
+        CarryForwardBalance carryForward = carryForwardBalanceRepository
+                .findByEmployeeIdAndYear(employeeId, year)
+                .orElse(null);
+
+        double carriedFromLastYear = 0.0;
+        if (carryForward != null) {
+            carriedFromLastYear = carryForward.getRemaining();
+        }
+
+        log.info("   Carry Forward: {} days", carriedFromLastYear);
+
+        // ═══════════════════════════════════════════════════════════
+        // 7. CALCULATE ELIGIBLE CARRY FORWARD FOR YEAR-END
+        // Rule: If yearlyBalance <= 10, carry that amount (max 10)
+        //       If yearlyBalance > 10, carry only 10
+        // ═══════════════════════════════════════════════════════════
+
+        double yearlyBalance = totalAllocated - totalUsed;
+        double eligibleToCarry = 0.0;
+
+        if (yearlyBalance > 0) {
+            if (yearlyBalance <= PolicyConstants.CARRY_FORWARD_ELIGIBILITY_THRESHOLD) {
+                eligibleToCarry = yearlyBalance;
+            } else {
+                eligibleToCarry = PolicyConstants.MAX_CARRY_FORWARD;
+            }
+        }
+
+        log.info("   Yearly Balance: {}, Eligible to Carry: {}", yearlyBalance, eligibleToCarry);
+
+        // ═══════════════════════════════════════════════════════════
+        // 8. GET MONTHLY STATS
+        // ═══════════════════════════════════════════════════════════
 
         int currentMonth = LocalDate.now().getMonthValue();
-        long currentMonthApproved = approvedLeaves.stream()
-                .filter(l -> l.getStartDate().getMonthValue() == currentMonth)
-                .count();
+        Integer currentMonthApprovedCount = leaveApplicationRepository
+                .countApprovedInMonth(employeeId, year, currentMonth);
 
-        Double lopPercentage =
-                lossOfPayRecordRepository.getTotalLossPercentageByEmployeeIdAndYear(employeeId, year);
+        boolean exceededMonthlyLimit =
+                currentMonthApprovedCount > PolicyConstants.MONTHLY_LIMIT;
+
+        log.info("   Current Month Approved: {}, Exceeded Limit: {}",
+                currentMonthApprovedCount, exceededMonthlyLimit);
+
+        // ═══════════════════════════════════════════════════════════
+        // 9. GET LOSS OF PAY PERCENTAGE
+        // ═══════════════════════════════════════════════════════════
+
+        Double lopPercentage = lossOfPayRecordRepository
+                .getTotalLossPercentageByEmployeeIdAndYear(employeeId, year);
+
+        if (lopPercentage == null) {
+            lopPercentage = 0.0;
+        }
+
+        log.info("   Loss of Pay: {}%", lopPercentage);
+
+        // ═══════════════════════════════════════════════════════════
+        // 10. BUILD RESPONSE
+        // ═══════════════════════════════════════════════════════════
 
         LeaveBalanceResponse response = new LeaveBalanceResponse();
         response.setEmployeeId(employeeId);
@@ -116,237 +224,144 @@ public class LeaveBalanceService {
         response.setYear(year);
         response.setTotalAllocated(totalAllocated);
         response.setTotalUsed(totalUsed);
-        response.setTotalRemaining(remaining);
-        response.setCompOffBalance(compOffBalance.doubleValue());
-        response.setEligibleToCarry(Math.min(Math.max(remaining, 0), MAX_CARRY_FORWARD));
-        response.setCurrentMonthApproved((int) currentMonthApproved);
-        response.setExceededMonthlyLimit(currentMonthApproved > MONTHLY_ALLOCATED);
-        response.setLopPercentage(lopPercentage != null ? lopPercentage : 0.0);
+        response.setTotalRemaining(yearlyBalance);
+        response.setCompOffBalance(compOffAvailable);
+        response.setCompOffEarned(compOffEarned);
+        response.setCompOffUsed(compOffUsed);
+        response.setLopPercentage(lopPercentage);
+        response.setCarriedFromLastYear(carriedFromLastYear);
+        response.setEligibleToCarry(eligibleToCarry);
+        response.setCurrentMonthApproved(currentMonthApprovedCount);
+        response.setExceededMonthlyLimit(exceededMonthlyLimit);
         response.setBreakdown(breakdown);
-        response.setTotalWorkingDays(employee.getTotalWorkingDays());
+
+        log.info("✅ [BALANCE] Balance calculation complete");
 
         return response;
     }
 
-    // =====================================================
-    // WRITE: MONTHLY APPROVED LEAVE PROCESSING (NEW LOGIC)
-    // =====================================================
+    // ═══════════════════════════════════════════════════════════════
+    // INITIALIZE ALLOCATIONS FOR NEW EMPLOYEE
+    // ═══════════════════════════════════════════════════════════════
+
     /**
-     * MONTHLY APPROVED LEAVE PROCESS
+     * Initialize leave allocations for new employee
+     * Creates allocations for VACATION, SICK, CASUAL, PERSONAL (Total: 24 days)
+     * Does NOT create COMP_OFF allocation (it's earned)
+     */
+    @Transactional
+    public void initializeAllocations(Long employeeId, Integer year) {
+
+        log.info("🆕 [INIT] Initializing allocations for employee: {}, year: {}",
+                employeeId, year);
+
+        // Check if already exists
+        List<LeaveAllocation> existing =
+                allocationRepository.findByEmployeeIdAndYear(employeeId, year);
+
+        if (!existing.isEmpty()) {
+            log.warn("   Allocations already exist for employee: {}, year: {}",
+                    employeeId, year);
+            return;
+        }
+
+        // Create allocations (NO COMP_OFF here!)
+        List<LeaveAllocation> allocations = Arrays.asList(
+                createAllocation(employeeId, year, "VACATION",
+                        PolicyConstants.VACATION_YEARLY_ALLOCATION),
+                createAllocation(employeeId, year, "SICK",
+                        PolicyConstants.SICK_YEARLY_ALLOCATION),
+                createAllocation(employeeId, year, "CASUAL",
+                        PolicyConstants.CASUAL_YEARLY_ALLOCATION),
+                createAllocation(employeeId, year, "PERSONAL",
+                        PolicyConstants.PERSONAL_YEARLY_ALLOCATION)
+        );
+
+        allocationRepository.saveAll(allocations);
+
+        log.info("✅ [INIT] Created {} allocations (Total: {} days)",
+                allocations.size(), PolicyConstants.TOTAL_YEARLY_ALLOCATION);
+    }
+
+    private LeaveAllocation createAllocation(Long employeeId, Integer year,
+                                             String category, Double days) {
+        LeaveAllocation alloc = new LeaveAllocation();
+        alloc.setEmployeeId(employeeId);
+        alloc.setYear(year);
+        alloc.setLeaveCategory(category);
+        alloc.setAllocatedDays(days);
+        return alloc;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // VALIDATE SUFFICIENT BALANCE
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Validate if employee has sufficient balance for leave type
      *
-     * Flow:
-     * 1. Calculate excess = approvedDays - monthlyAllocated (2)
-     * 2. If excess > 0:
-     *    a. Check carry forward availability (COMMON pool)
-     *    b. Use carry forward first (update totalUsed and remaining)
-     *    c. If carry forward insufficient → apply loss of pay (1% per day)
-     * 3. Loss of pay accumulates across months
+     * Special handling:
+     * - COMP_OFF: Check comp-off balance, not allocation
+     * - Others: Check allocation balance
      */
-    @Transactional
-    public void processMonthlyApprovedLeave(
-            Long employeeId, Double approvedDays, Integer year, Integer month) {
+    public boolean hasSufficientBalance(Long employeeId, Integer year,
+                                        LeaveType leaveType, Double daysRequested) {
 
-        log.info("\n=== MONTHLY LEAVE PROCESSING ===");
-        log.info("Employee ID: {}", employeeId);
-        log.info("Approved Days: {}", approvedDays);
-        log.info("Year: {}, Month: {}", year, month);
-        log.info("Monthly Allocated: {}", MONTHLY_ALLOCATED);
+        log.info("🔍 [VALIDATE] Checking balance: employee={}, type={}, days={}",
+                employeeId, leaveType, daysRequested);
 
-        // STEP 1: Calculate excess
-        double excessBalance = approvedDays - MONTHLY_ALLOCATED;
+        if (leaveType == LeaveType.COMP_OFF) {
+            // Special handling for COMP_OFF
+            CompOffBalance compOff = compOffBalanceRepository
+                    .findByEmployeeIdAndYear(employeeId, year)
+                    .orElse(null);
 
-        log.info("Excess Balance: {} - {} = {}", approvedDays, MONTHLY_ALLOCATED, excessBalance);
-
-        if (excessBalance <= 0) {
-            log.info("✓ No excess (approved days within monthly allocation)");
-            return;
-        }
-
-        log.info("→ Excess detected! Processing excess of {} days", excessBalance);
-
-        // ===================================================================
-        // STEP 2: CHECK CARRY FORWARD AVAILABILITY (COMMON POOL)
-        // ===================================================================
-        Optional<CarryForwardBalance> carryForwardOpt =
-                carryForwardBalanceRepository.findByEmployeeIdAndYear(employeeId, year);
-
-        if (carryForwardOpt.isPresent() && carryForwardOpt.get().getRemaining() > 0) {
-
-            // CARRY FORWARD IS AVAILABLE (COMMON - NOT CATEGORY SPECIFIC)
-            CarryForwardBalance carryForward = carryForwardOpt.get();
-            double availableCarryForward = carryForward.getRemaining();
-
-            log.info("✓ Carry Forward Available (COMMON POOL)!");
-            log.info("  Total Carried Forward: {}", carryForward.getTotalCarriedForward());
-            log.info("  Already Used: {}", carryForward.getTotalUsed());
-            log.info("  Remaining: {}", availableCarryForward);
-
-            // ===================================================================
-            // STEP 3: USE CARRY FORWARD FIRST (BEFORE LOSS OF PAY)
-            // ===================================================================
-            double usableFromCarryForward = Math.min(excessBalance, availableCarryForward);
-
-            carryForward.setTotalUsed(carryForward.getTotalUsed() + usableFromCarryForward);
-            carryForward.setRemaining(carryForward.getRemaining() - usableFromCarryForward);
-            carryForwardBalanceRepository.save(carryForward);
-
-            log.info("✓ Used {} days from COMMON carry forward", usableFromCarryForward);
-            log.info("  Updated Total Used: {}", carryForward.getTotalUsed());
-            log.info("  Updated Remaining: {}", carryForward.getRemaining());
-
-            // Update excess after using carry forward
-            excessBalance -= usableFromCarryForward;
-
-            if (excessBalance > 0) {
-                log.info("→ Remaining excess after carry forward: {} days", excessBalance);
-                log.info("→ Applying loss of pay for remaining excess");
-            } else {
-                log.info("  Loss of Pay: 0% (carry forward covered all excess)");
+            if (compOff == null) {
+                log.warn("   No comp-off balance found");
+                return false;
             }
+
+            boolean sufficient = compOff.getBalance() >= daysRequested;
+            log.info("   CompOff balance: {}, Requested: {}, Sufficient: {}",
+                    compOff.getBalance(), daysRequested, sufficient);
+            return sufficient;
+
         } else {
-            // NO CARRY FORWARD AVAILABLE
-            log.info("✗ No carry forward available (remaining = 0)");
-            log.info("→ Applying loss of pay for entire excess of {} days", excessBalance);
-        }
+            // Regular leave types
+            LeaveAllocation allocation = allocationRepository
+                    .findByEmployeeIdAndYearAndLeaveCategory(
+                            employeeId, year, leaveType.name())
+                    .orElse(null);
 
-        // ===================================================================
-        // STEP 4: APPLY LOSS OF PAY (IF STILL EXCESS AFTER CARRY FORWARD)
-        // ===================================================================
-        if (excessBalance > 0) {
-            applyLossOfPay(employeeId, year, month, excessBalance);
-        }
+            if (allocation == null) {
+                log.warn("   No allocation found for type: {}", leaveType);
+                return false;
+            }
 
-        log.info("=== MONTHLY LEAVE PROCESSING COMPLETE ===\n");
+            // Calculate used for this type
+            Double used = leaveApplicationRepository.getTotalUsedDays(
+                    employeeId, LeaveStatus.APPROVED, year);
+
+            if (used == null) used = 0.0;
+
+            double available = allocation.getAllocatedDays() - used;
+            boolean sufficient = available >= daysRequested;
+
+            log.info("   Allocated: {}, Used: {}, Available: {}, Requested: {}, Sufficient: {}",
+                    allocation.getAllocatedDays(), used, available,
+                    daysRequested, sufficient);
+
+            return sufficient;
+        }
     }
 
-    // =====================================================
-    // WRITE: YEAR END CARRY FORWARD (NEW LOGIC)
-    // =====================================================
-    /**
-     * Process year-end carry forward
-     * Rule: If yearly balance <= 5, carry forward to next year (max 5)
-     * Carry forward is stored as COMMON pool (not category-specific)
-     */
-    @Transactional
-    public void processYearEndCarryForward(
-            Long employeeId, Integer currentYear, Double yearlyBalance) {
+    // ═══════════════════════════════════════════════════════════════
+    // GET TOTAL LOSS OF PAY PERCENTAGE
+    // ═══════════════════════════════════════════════════════════════
 
-        log.info("[CARRY-FORWARD] Processing for employee {}: year={}, balance={}",
-                employeeId, currentYear, yearlyBalance);
-
-        double carryAmount = Math.min(Math.max(yearlyBalance, 0), MAX_CARRY_FORWARD);
-
-        if (carryAmount == 0) {
-            log.info("[CARRY-FORWARD] No balance to carry forward");
-            return;
-        }
-
-        CarryForwardBalance carry =
-                carryForwardBalanceRepository
-                        .findByEmployeeIdAndYear(employeeId, currentYear + 1)
-                        .orElse(new CarryForwardBalance());
-
-        carry.setEmployeeId(employeeId);
-        carry.setYear(currentYear + 1);
-        carry.setTotalCarriedForward(carryAmount);
-        carry.setTotalUsed(0.0);
-        carry.setRemaining(carryAmount);
-
-        carryForwardBalanceRepository.save(carry);
-
-        log.info("[CARRY-FORWARD] Carried forward {} days to year {}",
-                carryAmount, currentYear + 1);
-    }
-
-    // =====================================================
-    // READ: GET CARRY FORWARD BALANCE
-    // =====================================================
-    public CarryForwardBalance getCarryForwardBalance(Long employeeId, Integer year) {
-        return carryForwardBalanceRepository
-                .findByEmployeeIdAndYear(employeeId, year)
-                .orElse(null);
-    }
-
-    // =====================================================
-    // READ: TOTAL LOSS OF PAY (FOR CONTROLLER/DASHBOARD)
-    // =====================================================
     public Double getTotalLossOfPayPercentage(Long employeeId, Integer year) {
-        Double total =
-                lossOfPayRecordRepository
-                        .getTotalLossPercentageByEmployeeIdAndYear(employeeId, year);
-
-        return total != null ? total : 0.0;
-    }
-
-    // =====================================================
-    // PRIVATE: LOSS OF PAY APPLICATION
-    // =====================================================
-    /**
-     * Apply loss of pay - called ONLY after carry forward is checked
-     * Rule: 1% per excess day
-     * Accumulates across months (e.g., Month1: 2% + Month2: 3% = Total: 5%)
-     */
-    private void applyLossOfPay(
-            Long employeeId, Integer year, Integer month, Double excessDays) {
-
-        log.info("  === LOSS OF PAY APPLICATION ===");
-        log.info("  Employee ID: {}, Year: {}, Month: {}", employeeId, year, month);
-        log.info("  Excess Days (after carry forward check): {}", excessDays);
-
-        // Calculate loss percentage (1% per day)
-        double lossPercentage = excessDays * LOSS_OF_PAY_INCREMENT;
-
-        log.info("  Loss Percentage: {} days × {}% = {}%",
-                excessDays, LOSS_OF_PAY_INCREMENT, lossPercentage);
-
-        // Create or update loss of pay record for this month
-        LossOfPayRecord record =
-                lossOfPayRecordRepository
-                        .findByEmployeeIdAndYearAndMonth(employeeId, year, month)
-                        .orElse(new LossOfPayRecord());
-
-        record.setEmployeeId(employeeId);
-        record.setYear(year);
-        record.setMonth(month);
-        record.setExcessDays(excessDays);
-        record.setLossPercentage(lossPercentage);
-
-        lossOfPayRecordRepository.save(record);
-
-        // Get accumulated total loss of pay
-        Double totalLoss = lossOfPayRecordRepository
+        Double total = lossOfPayRecordRepository
                 .getTotalLossPercentageByEmployeeIdAndYear(employeeId, year);
-
-        log.info("  ✓ Loss of pay recorded for month {}: {}%", month, lossPercentage);
-        log.info("  ✓ TOTAL ACCUMULATED LOSS OF PAY for year {}: {}%", year, totalLoss);
-        log.info("  === LOSS OF PAY APPLICATION COMPLETE ===");
-    }
-
-    // =====================================================
-    // ADAPTER METHOD: FOR APPROVAL FLOW INTEGRATION
-    // =====================================================
-    /**
-     * Called from LeaveApprovalService when leave is approved
-     * Automatically triggers monthly leave processing
-     */
-    @Transactional
-    public void applyApprovedLeave(LeaveApplication leave) {
-
-        // Safety check
-        if (leave.getStatus() != LeaveStatus.APPROVED) {
-            log.warn("Leave application {} is not approved, skipping processing", leave.getId());
-            return;
-        }
-
-        Long employeeId = leave.getEmployeeId();
-        Double approvedDays = leave.getDays().doubleValue();
-        Integer year = leave.getStartDate().getYear();
-        Integer month = leave.getStartDate().getMonthValue();
-
-        log.info("Processing approved leave: application={}, employee={}, days={}, date={}-{}",
-                leave.getId(), employeeId, approvedDays, year, month);
-
-        // Delegate to monthly leave processing logic
-        processMonthlyApprovedLeave(employeeId, approvedDays, year, month);
+        return total != null ? total : 0.0;
     }
 }

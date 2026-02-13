@@ -5,7 +5,6 @@ import com.example.notificationservice.enums.EventType;
 import com.example.notificationservice.enums.NotificationStatus;
 import jakarta.persistence.*;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity

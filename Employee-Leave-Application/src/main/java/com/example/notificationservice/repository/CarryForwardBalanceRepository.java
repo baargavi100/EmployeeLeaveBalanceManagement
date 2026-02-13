@@ -1,3 +1,8 @@
+// ═══════════════════════════════════════════════════════════════════
+// FILE: CarryForwardBalanceRepository.java
+// Location: src/main/java/com/example/notificationservice/repository/
+// ═══════════════════════════════════════════════════════════════════
+
 package com.example.notificationservice.repository;
 
 import com.example.notificationservice.entity.CarryForwardBalance;
@@ -8,13 +13,30 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface CarryForwardBalanceRepository
-        extends JpaRepository<CarryForwardBalance, Long> {
+public interface CarryForwardBalanceRepository extends JpaRepository<CarryForwardBalance, Long> {
 
+    /**
+     * Find carry forward balance for employee in specific year
+     */
     Optional<CarryForwardBalance> findByEmployeeIdAndYear(Long employeeId, Integer year);
 
+    /**
+     * Find all carry forward balances for a year (HR view)
+     */
+    List<CarryForwardBalance> findByYear(Integer year);
+
+    /**
+     * Find all carry forward balances for employee (all years)
+     */
+    List<CarryForwardBalance> findByEmployeeId(Long employeeId);
+
+    /**
+     * Check if carry forward exists for employee in year
+     */
     boolean existsByEmployeeIdAndYear(Long employeeId, Integer year);
 
-    // Added for HR - fetch all balances by year
-    List<CarryForwardBalance> findByYear(Integer year);
+    /**
+     * Delete carry forward for employee in year
+     */
+    void deleteByEmployeeIdAndYear(Long employeeId, Integer year);
 }

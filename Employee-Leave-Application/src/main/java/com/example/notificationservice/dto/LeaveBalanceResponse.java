@@ -1,3 +1,8 @@
+// ═══════════════════════════════════════════════════════════════════
+// FILE: LeaveBalanceResponse.java
+// Location: src/main/java/com/example/notificationservice/dto/
+// ═══════════════════════════════════════════════════════════════════
+
 package com.example.notificationservice.dto;
 
 import java.util.List;
@@ -8,16 +13,17 @@ public class LeaveBalanceResponse {
     private String employeeName;
     private Integer year;
 
-    // Total leave statistics
+    // Total leave statistics (24 days total allocated)
     private Double totalAllocated;
     private Double totalUsed;
     private Double totalRemaining;
 
+    // CompOff Balance (earned, not allocated)
     private Double compOffBalance;
     private Double compOffEarned;
     private Double compOffUsed;
 
-    // Loss of Pay (only from monthly violations)
+    // Loss of Pay (from monthly violations)
     private Double lopPercentage;
 
     // Carry Forward
@@ -28,11 +34,12 @@ public class LeaveBalanceResponse {
     private Integer currentMonthApproved;
     private Boolean exceededMonthlyLimit;
 
-    // Working Days
-    private Integer totalWorkingDays;
-
     // Breakdown per leave type
     private List<LeaveTypeBreakdown> breakdown;
+
+    // ═══════════════════════════════════════════════════════════════
+    // GETTERS AND SETTERS
+    // ═══════════════════════════════════════════════════════════════
 
     public Long getEmployeeId() {
         return employeeId;
@@ -144,14 +151,6 @@ public class LeaveBalanceResponse {
 
     public void setExceededMonthlyLimit(Boolean exceededMonthlyLimit) {
         this.exceededMonthlyLimit = exceededMonthlyLimit;
-    }
-
-    public Integer getTotalWorkingDays() {
-        return totalWorkingDays;
-    }
-
-    public void setTotalWorkingDays(Integer totalWorkingDays) {
-        this.totalWorkingDays = totalWorkingDays;
     }
 
     public List<LeaveTypeBreakdown> getBreakdown() {

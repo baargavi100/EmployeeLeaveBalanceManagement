@@ -1,23 +1,20 @@
+// ═══════════════════════════════════════════════════════════════════
+// FILE: LeaveAllocation.java
+// Location: src/main/java/com/example/notificationservice/entity/
+// IMPORTANT: CompOff is NOT allocated here (it's earned separately)
+// ═══════════════════════════════════════════════════════════════════
+
 package com.example.notificationservice.entity;
 
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
-/**
- * Entity: Leave Allocation
- * Purpose: Store leave allocations by category
- * Table: leave_allocation
- * NOTE: Carry forward is NO LONGER stored here - it's in carry_forward_balance table
- */
 @Entity
-@Table(name = "leave_allocation")
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
+@Table(name = "leave_allocation",
+        uniqueConstraints = @UniqueConstraint(
+                columnNames = {"employee_id", "leave_category", "leave_year"}
+        ))
 public class LeaveAllocation {
 
     @Id
@@ -27,12 +24,20 @@ public class LeaveAllocation {
     @Column(name = "employee_id", nullable = false)
     private Long employeeId;
 
+    /**
+     * Leave Category: VACATION, SICK, CASUAL, PERSONAL
+     * NOTE: COMP_OFF is NOT allocated here (it's earned)
+     */
     @Column(name = "leave_category", nullable = false)
     private String leaveCategory;
 
     @Column(name = "leave_year", nullable = false)
     private Integer year;
 
+    /**
+     * Allocated days for this category
+     * VACATION = 8, SICK = 6, CASUAL = 6, PERSONAL = 4
+     */
     @Column(name = "allocated_days", nullable = false)
     private Double allocatedDays = 0.0;
 
@@ -53,25 +58,63 @@ public class LeaveAllocation {
         updatedAt = LocalDateTime.now();
     }
 
-    // ============================================================
-    // BACKWARD COMPATIBILITY METHODS
-    // These methods exist for compatibility with old code
-    // Carry forward is now stored in carry_forward_balance table
-    // ============================================================
+    // ═══════════════════════════════════════════════════════════════
+    // GETTERS AND SETTERS
+    // ═══════════════════════════════════════════════════════════════
 
-    /**
-     * Legacy method - always returns 0.0
-     * Carry forward is now in carry_forward_balance table
-     */
-    public Double getCarriedForwardDays() {
-        return 0.0;
+    public Long getId() {
+        return id;
     }
 
-    /**
-     * Legacy method - does nothing
-     * Carry forward is now in carry_forward_balance table
-     */
-    public void setCarriedForwardDays(Double days) {
-        // Intentionally does nothing - carry forward is stored separately
+    public void setId(Long id) {
+        this.id = id;
+    }
+
+    public Long getEmployeeId() {
+        return employeeId;
+    }
+
+    public void setEmployeeId(Long employeeId) {
+        this.employeeId = employeeId;
+    }
+
+    public String getLeaveCategory() {
+        return leaveCategory;
+    }
+
+    public void setLeaveCategory(String leaveCategory) {
+        this.leaveCategory = leaveCategory;
+    }
+
+    public Integer getYear() {
+        return year;
+    }
+
+    public void setYear(Integer year) {
+        this.year = year;
+    }
+
+    public Double getAllocatedDays() {
+        return allocatedDays;
+    }
+
+    public void setAllocatedDays(Double allocatedDays) {
+        this.allocatedDays = allocatedDays;
+    }
+
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
+    }
+
+    public LocalDateTime getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void setUpdatedAt(LocalDateTime updatedAt) {
+        this.updatedAt = LocalDateTime.now();
     }
 }

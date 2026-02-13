@@ -1,6 +1,12 @@
+// ═══════════════════════════════════════════════════════════════════
+// FILE: TeamMemberBalance.java
+// Location: src/main/java/com/example/notificationservice/dto/
+// ═══════════════════════════════════════════════════════════════════
+
 package com.example.notificationservice.dto;
 
 public class TeamMemberBalance {
+
     private Long employeeId;
     private String employeeName;
     private Double totalAllocated;
@@ -8,8 +14,10 @@ public class TeamMemberBalance {
     private Double totalRemaining;
     private Double compOffBalance;
     private Double lopPercentage;
-    private Integer totalWorkingDays;
 
+    // ═══════════════════════════════════════════════════════════════
+    // GETTERS AND SETTERS
+    // ═══════════════════════════════════════════════════════════════
 
     public Long getEmployeeId() {
         return employeeId;
@@ -65,13 +73,5 @@ public class TeamMemberBalance {
 
     public void setLopPercentage(Double lopPercentage) {
         this.lopPercentage = lopPercentage;
-    }
-
-    public Integer getTotalWorkingDays() {
-        return totalWorkingDays;
-    }
-
-    public void setTotalWorkingDays(Integer totalWorkingDays) {
-        this.totalWorkingDays = totalWorkingDays;
     }
 }

@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════
-// CarryForwardController.java - For Employee/Manager to VIEW carry forward
+// FILE: CarryForwardController.java
 // Location: src/main/java/com/example/notificationservice/controller/
 // ═══════════════════════════════════════════════════════════════════
 
@@ -8,112 +8,103 @@ package com.example.notificationservice.controller;
 import com.example.notificationservice.dto.CarryForwardBalanceResponse;
 import com.example.notificationservice.dto.CarryForwardEligibilityResponse;
 import com.example.notificationservice.service.CarryForwardService;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
+
 @RestController
-@RequestMapping("/api/carry-forward")
-@CrossOrigin(origins = "*")
+@RequestMapping("/api/carryforward")
+@RequiredArgsConstructor
 @Slf4j
 public class CarryForwardController {
 
     private final CarryForwardService carryForwardService;
 
-    public CarryForwardController(CarryForwardService carryForwardService) {
-        this.carryForwardService = carryForwardService;
-    }
+    // ═══════════════════════════════════════════════════════════════
+    // GET CARRY FORWARD BALANCE
+    // ═══════════════════════════════════════════════════════════════
 
-    /**
-     * ═══════════════════════════════════════════════════════════════
-     * GET CARRY FORWARD BALANCE
-     * GET /api/carry-forward/balance/{employeeId}?year=2026
-     * ═══════════════════════════════════════════════════════════════
-     */
     @GetMapping("/balance/{employeeId}")
-    public ResponseEntity<?> getCarryForwardBalance(
+    public ResponseEntity<CarryForwardBalanceResponse> getBalance(
             @PathVariable Long employeeId,
-            @RequestParam Integer year) {
+            @RequestParam(required = false) Integer year) {
 
-        log.info("[API] GET carry-forward balance: employee={}, year={}", employeeId, year);
+        log.info("[CARRYFORWARD] Fetching balance: employee={}, year={}", employeeId, year);
 
-        try {
-            CarryForwardBalanceResponse response = carryForwardService.getBalance(employeeId, year);
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            log.error("[API] Failed to get balance: {}", e.getMessage());
-            return ResponseEntity.badRequest()
-                    .body("Error: " + e.getMessage());
+        if (year == null) {
+            year = LocalDate.now().getYear();
         }
+
+        CarryForwardBalanceResponse balance = carryForwardService.getBalance(employeeId, year);
+
+        return ResponseEntity.ok(balance);
     }
 
-    /**
-     * ═══════════════════════════════════════════════════════════════
-     * CHECK ELIGIBILITY FOR CARRY FORWARD
-     * GET /api/carry-forward/eligibility/{employeeId}?year=2026
-     * ═══════════════════════════════════════════════════════════════
-     */
+    // ═══════════════════════════════════════════════════════════════
+    // CHECK ELIGIBILITY
+    // ═══════════════════════════════════════════════════════════════
+
     @GetMapping("/eligibility/{employeeId}")
-    public ResponseEntity<?> checkEligibility(
+    public ResponseEntity<CarryForwardEligibilityResponse> checkEligibility(
             @PathVariable Long employeeId,
-            @RequestParam Integer year) {
+            @RequestParam(required = false) Integer year) {
 
-        log.info("[API] GET eligibility: employee={}, year={}", employeeId, year);
+        log.info("[CARRYFORWARD] Checking eligibility: employee={}, year={}", employeeId, year);
+
+        if (year == null) {
+            year = LocalDate.now().getYear();
+        }
+
+        CarryForwardEligibilityResponse eligibility =
+                carryForwardService.checkEligibility(employeeId, year);
+
+        return ResponseEntity.ok(eligibility);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // PROCESS YEAR-END CARRY FORWARD (HR/Admin only)
+    // ═══════════════════════════════════════════════════════════════
+
+    @PostMapping("/process/{year}")
+    public ResponseEntity<?> processYearEnd(@PathVariable Integer year) {
+
+        log.info("[CARRYFORWARD] Processing year-end carry forward for year: {}", year);
 
         try {
-            CarryForwardEligibilityResponse response =
-                    carryForwardService.checkEligibility(employeeId, year);
-            return ResponseEntity.ok(response);
+            carryForwardService.processYearEndCarryForward(year);
+
+            return ResponseEntity.ok(Map.of(
+                    "message", "Year-end carry forward processed successfully",
+                    "year", year
+            ));
+
         } catch (Exception e) {
-            log.error("[API] Failed to check eligibility: {}", e.getMessage());
-            return ResponseEntity.badRequest()
-                    .body("Error: " + e.getMessage());
+            log.error("[CARRYFORWARD] Error processing year-end", e);
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "Failed to process year-end carry forward",
+                    "details", e.getMessage()
+            ));
         }
     }
 
-    /**
-     * ═══════════════════════════════════════════════════════════════
-     * USE CARRY FORWARD (Manual deduction for testing)
-     * POST /api/carry-forward/use
-     * ═══════════════════════════════════════════════════════════════
-     */
-    @PostMapping("/use")
-    public ResponseEntity<?> useCarryForward(
-            @RequestParam Long employeeId,
-            @RequestParam Integer year,
-            @RequestParam Double days) {
+    // ═══════════════════════════════════════════════════════════════
+    // GET ALL BALANCES FOR A YEAR (HR Report)
+    // ═══════════════════════════════════════════════════════════════
 
-        log.info("[API] POST use carry-forward: employee={}, year={}, days={}",
-                employeeId, year, days);
+    @GetMapping("/balances/{year}")
+    public ResponseEntity<List<CarryForwardBalanceResponse>> getAllBalances(
+            @PathVariable Integer year) {
 
-        try {
-            carryForwardService.useCarryForward(employeeId, year, days);
-            return ResponseEntity.ok("Used " + days + " days from carry forward successfully");
-        } catch (Exception e) {
-            log.error("[API] Failed to use carry forward: {}", e.getMessage());
-            return ResponseEntity.badRequest()
-                    .body("Error: " + e.getMessage());
-        }
-    }
+        log.info("[CARRYFORWARD] Fetching all balances for year: {}", year);
 
-    /**
-     * ═══════════════════════════════════════════════════════════════
-     * GET ALL EMPLOYEES WITH CARRY FORWARD (For HR)
-     * GET /api/carry-forward/all?year=2026
-     * ═══════════════════════════════════════════════════════════════
-     */
-    @GetMapping("/all")
-    public ResponseEntity<?> getAllCarryForward(@RequestParam Integer year) {
+        List<CarryForwardBalanceResponse> balances =
+                carryForwardService.getAllBalances(year);
 
-        log.info("[API] GET all carry-forward: year={}", year);
-
-        try {
-            var allBalances = carryForwardService.getAllBalances(year);
-            return ResponseEntity.ok(allBalances);
-        } catch (Exception e) {
-            log.error("[API] Failed to get all balances: {}", e.getMessage());
-            return ResponseEntity.badRequest()
-                    .body("Error: " + e.getMessage());
-        }
+        return ResponseEntity.ok(balances);
     }
 }

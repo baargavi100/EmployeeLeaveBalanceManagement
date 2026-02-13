@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════
 // FILE: EmployeeDashboardResponse.java
-// Location: src/main/java/com/example/notificationservice/dto/response/
+// Location: src/main/java/com/example/notificationservice/dto/
 // ═══════════════════════════════════════════════════════════════════
 
 package com.example.notificationservice.dto;
@@ -41,16 +41,12 @@ public class EmployeeDashboardResponse {
     // Breakdown by leave type
     private List<LeaveTypeBreakdown> breakdown;
 
-    // ═══════════════════════════════════════════════════════════════
-    // CONSTRUCTORS
-    // ═══════════════════════════════════════════════════════════════
-
     public EmployeeDashboardResponse() {
         this.lastUpdated = LocalDateTime.now();
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // GETTERS & SETTERS
+    // GETTERS AND SETTERS
     // ═══════════════════════════════════════════════════════════════
 
     public Long getEmployeeId() {

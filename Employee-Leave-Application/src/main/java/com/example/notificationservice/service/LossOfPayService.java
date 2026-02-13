@@ -1,13 +1,16 @@
 package com.example.notificationservice.service;
 
-import com.example.notificationservice.entity.LossOfPayRecord;
-import com.example.notificationservice.repository.LossOfPayRecordRepository;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import java.time.LocalDateTime;
+import java.util.Optional;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import com.example.notificationservice.entity.LossOfPayRecord;
+import com.example.notificationservice.repository.LossOfPayRecordRepository;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
 @RequiredArgsConstructor
@@ -48,12 +51,50 @@ public class LossOfPayService {
         log.info("[LOP] Applied {}% loss of pay for {} excess days", lossPercentage, excessDays);
     }
 
+
     /**
      * Get total accumulated loss of pay for the year
      */
     public Double getTotalLossOfPayPercentage(Long empId, Integer year) {
         Double total = lopRepo.getTotalLossPercentageByEmployeeIdAndYear(empId, year);
         return total != null ? total : 0.0;
+    }
+
+    /**
+     * Get all LOP records for an employee (all years)
+     */
+    public java.util.List<LossOfPayRecord> getAllForEmployee(Long empId) {
+        return lopRepo.findByEmployeeIdOrderByYearDescMonthDesc(empId);
+    }
+
+    /**
+     * Get LOP records for an employee in a specific year
+     */
+    public java.util.List<LossOfPayRecord> getForEmployeeAndYear(Long empId, Integer year) {
+        return lopRepo.findByEmployeeIdAndYear(empId, year);
+    }
+    // ═══════════════════════════════════════════════════════════════════
+// ADD THIS METHOD to LossOfPayService.java
+// ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * Restore loss of pay (when leave is cancelled)
+     * Deletes the LOP record for that month
+     */
+    @Transactional
+    public void restoreLossOfPay(Long empId, Integer year, Integer month) {
+
+        log.info("[LOP-RESTORE] Restoring LOP: employee={}, year={}, month={}",
+                empId, year, month);
+
+        Optional<LossOfPayRecord>lopOpt = lopRepo.findByEmployeeIdAndYearAndMonth(empId, year, month);
+
+        if (lopOpt.isPresent()) {
+            lopRepo.delete(lopOpt.get());
+            log.info("[LOP-RESTORE] Deleted LOP record for month {}", month);
+        } else {
+            log.warn("[LOP-RESTORE] No LOP record found to restore");
+        }
     }
 
     /**

@@ -1,110 +1,135 @@
+// ═══════════════════════════════════════════════════════════════════
+// FILE: CarryForwardService.java
+// Location: src/main/java/com/example/notificationservice/service/
+// ═══════════════════════════════════════════════════════════════════
+
 package com.example.notificationservice.service;
 
+import com.example.notificationservice.constants.PolicyConstants;
 import com.example.notificationservice.dto.CarryForwardBalanceResponse;
 import com.example.notificationservice.dto.CarryForwardEligibilityResponse;
-import com.example.notificationservice.entity.*;
+import com.example.notificationservice.entity.CarryForwardBalance;
+import com.example.notificationservice.entity.Employee;
+import com.example.notificationservice.entity.LeaveAllocation;
 import com.example.notificationservice.enums.LeaveStatus;
-import com.example.notificationservice.repository.*;
-
+import com.example.notificationservice.repository.CarryForwardBalanceRepository;
+import com.example.notificationservice.repository.EmployeeRepository;
+import com.example.notificationservice.repository.LeaveAllocationRepository;
+import com.example.notificationservice.repository.LeaveApplicationRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
 
 @Service
-@Slf4j
 @RequiredArgsConstructor
+@Slf4j
 public class CarryForwardService {
 
     private final EmployeeRepository employeeRepository;
-    private final LeaveAllocationRepository allocationRepo;
-    private final LeaveApplicationRepository leaveApplicationRepository;
-    private final CarryForwardBalanceRepository carryForwardBalanceRepository;
-
-    private static final int MAX_CARRY_FORWARD = 10;
-    private static final double ELIGIBILITY_LIMIT = 10.0;
+    private final LeaveAllocationRepository allocationRepository;
+    private final LeaveApplicationRepository applicationRepository;
+    private final CarryForwardBalanceRepository carryForwardRepository;
 
     // ═══════════════════════════════════════════════════════════════
-    // YEAR-END PROCESSING
+    // YEAR-END CARRY FORWARD PROCESSING
     // ═══════════════════════════════════════════════════════════════
 
+    /**
+     * Process year-end carry forward for ALL employees
+     *
+     * Rule:
+     * - If yearlyBalance ≤ 10, carry forward that amount
+     * - If yearlyBalance > 10, carry forward only 10 days
+     */
     @Transactional
     public void processYearEndCarryForward(Integer fromYear) {
 
-        List<Employee> employees = employeeRepository.findAll();
+        log.info("🎆 [CARRY-FORWARD] Processing year-end for ALL employees: {}", fromYear);
+
+        List<Employee> employees = employeeRepository.findByActiveTrue();
 
         for (Employee employee : employees) {
-            processEmployeeCarryForward(employee.getId(), fromYear);
+            try {
+                processEmployeeCarryForward(employee.getId(), fromYear);
+            } catch (Exception e) {
+                log.error("❌ Failed to process carry forward for employee {}: {}",
+                        employee.getId(), e.getMessage());
+            }
         }
+
+        log.info("✅ [CARRY-FORWARD] Year-end processing complete");
     }
 
+    /**
+     * Process carry forward for single employee
+     */
     @Transactional
     public void processEmployeeCarryForward(Long employeeId, Integer fromYear) {
 
         Integer toYear = fromYear + 1;
 
-        List<LeaveAllocation> currentAllocations =
-                allocationRepo.findByEmployeeIdAndYear(employeeId, fromYear);
+        log.info("📊 [CARRY-FORWARD] Processing: employee={}, from={}, to={}",
+                employeeId, fromYear, toYear);
 
-        double totalAllocated = currentAllocations.stream()
+        // Get allocations for current year
+        List<LeaveAllocation> allocations = allocationRepository
+                .findByEmployeeIdAndYear(employeeId, fromYear);
+
+        double totalAllocated = allocations.stream()
                 .mapToDouble(LeaveAllocation::getAllocatedDays)
                 .sum();
 
-        Double totalUsed = leaveApplicationRepository
+        // Get total used
+        Double totalUsed = applicationRepository
                 .getTotalUsedDays(employeeId, LeaveStatus.APPROVED, fromYear);
 
         if (totalUsed == null) totalUsed = 0.0;
 
         double yearlyBalance = totalAllocated - totalUsed;
 
-        double carryForward = Math.min(
-                Math.max(yearlyBalance, 0),
-                MAX_CARRY_FORWARD
-        );
+        log.info("   Allocated: {}, Used: {}, Balance: {}",
+                totalAllocated, totalUsed, yearlyBalance);
 
-        storeCommonCarryForward(employeeId, toYear, carryForward);
-        createNextYearAllocations(employeeId, toYear);
-    }
+        // Calculate carry forward amount
+        double carryForward = 0.0;
 
-    private void storeCommonCarryForward(Long employeeId, Integer year, double carryForward) {
-
-        CarryForwardBalance cfBalance =
-                carryForwardBalanceRepository
-                        .findByEmployeeIdAndYear(employeeId, year)
-                        .orElse(new CarryForwardBalance());
-
-        cfBalance.setEmployeeId(employeeId);
-        cfBalance.setYear(year);
-        cfBalance.setTotalCarriedForward(carryForward);
-        cfBalance.setTotalUsed(0.0);
-        cfBalance.setRemaining(carryForward);
-
-        carryForwardBalanceRepository.save(cfBalance);
-    }
-
-    private void createNextYearAllocations(Long employeeId, Integer year) {
-
-        String[] categories = {"VACATION", "SICK", "CASUAL", "PERSONAL"};
-        double[] allocations = {8.0, 6.0, 6.0, 4.0};
-
-        for (int i = 0; i < categories.length; i++) {
-
-            if (allocationRepo.existsByEmployeeIdAndYearAndLeaveCategory(
-                    employeeId, year, categories[i])) {
-                continue;
+        if (yearlyBalance > 0) {
+            if (yearlyBalance <= PolicyConstants.CARRY_FORWARD_ELIGIBILITY_THRESHOLD) {
+                carryForward = yearlyBalance;
+            } else {
+                carryForward = PolicyConstants.MAX_CARRY_FORWARD;
             }
-
-            LeaveAllocation alloc = new LeaveAllocation();
-            alloc.setEmployeeId(employeeId);
-            alloc.setLeaveCategory(categories[i]);
-            alloc.setYear(year);
-            alloc.setAllocatedDays(allocations[i]);
-
-            allocationRepo.save(alloc);
         }
+
+        log.info("   Carry Forward Amount: {} days", carryForward);
+
+        // Store carry forward for next year
+        if (carryForward > 0) {
+            storeCarryForward(employeeId, toYear, carryForward);
+        } else {
+            log.info("   No balance to carry forward");
+        }
+    }
+
+    private void storeCarryForward(Long employeeId, Integer year, double amount) {
+
+        CarryForwardBalance balance = carryForwardRepository
+                .findByEmployeeIdAndYear(employeeId, year)
+                .orElse(new CarryForwardBalance());
+
+        balance.setEmployeeId(employeeId);
+        balance.setYear(year);
+        balance.setTotalCarriedForward(amount);
+        balance.setTotalUsed(0.0);
+        balance.setRemaining(amount);
+
+        carryForwardRepository.save(balance);
+
+        log.info("✅ Stored carry forward: {} days for year {}", amount, year);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -115,24 +140,21 @@ public class CarryForwardService {
     public CarryForwardBalanceResponse getBalance(Long employeeId, Integer year) {
 
         Employee employee = employeeRepository.findById(employeeId)
-                .orElseThrow(() -> new RuntimeException("Employee not found"));
+                .orElseThrow(() -> new RuntimeException("Employee not found: " + employeeId));
 
-        CarryForwardBalance cfBalance =
-                carryForwardBalanceRepository
-                        .findByEmployeeIdAndYear(employeeId, year)
-                        .orElse(null);
+        CarryForwardBalance balance = carryForwardRepository
+                .findByEmployeeIdAndYear(employeeId, year)
+                .orElse(null);
 
-        CarryForwardBalanceResponse response =
-                new CarryForwardBalanceResponse();
-
+        CarryForwardBalanceResponse response = new CarryForwardBalanceResponse();
         response.setEmployeeId(employeeId);
         response.setEmployeeName(employee.getName());
         response.setYear(year);
 
-        if (cfBalance != null) {
-            response.setTotalCarriedForward(cfBalance.getTotalCarriedForward());
-            response.setTotalUsed(cfBalance.getTotalUsed());
-            response.setRemaining(cfBalance.getRemaining());
+        if (balance != null) {
+            response.setTotalCarriedForward(balance.getTotalCarriedForward());
+            response.setTotalUsed(balance.getTotalUsed());
+            response.setRemaining(balance.getRemaining());
         } else {
             response.setTotalCarriedForward(0.0);
             response.setTotalUsed(0.0);
@@ -150,16 +172,16 @@ public class CarryForwardService {
     public CarryForwardEligibilityResponse checkEligibility(Long employeeId, Integer year) {
 
         Employee employee = employeeRepository.findById(employeeId)
-                .orElseThrow(() -> new RuntimeException("Employee not found"));
+                .orElseThrow(() -> new RuntimeException("Employee not found: " + employeeId));
 
-        List<LeaveAllocation> allocations =
-                allocationRepo.findByEmployeeIdAndYear(employeeId, year);
+        List<LeaveAllocation> allocations = allocationRepository
+                .findByEmployeeIdAndYear(employeeId, year);
 
         double yearlyAllocated = allocations.stream()
                 .mapToDouble(LeaveAllocation::getAllocatedDays)
                 .sum();
 
-        Double totalUsed = leaveApplicationRepository
+        Double totalUsed = applicationRepository
                 .getTotalUsedDays(employeeId, LeaveStatus.APPROVED, year);
 
         if (totalUsed == null) totalUsed = 0.0;
@@ -167,17 +189,23 @@ public class CarryForwardService {
         double balance = yearlyAllocated - totalUsed;
 
         boolean eligible = balance > 0;
-        double eligibleAmount = eligible
-                ? Math.min(balance, ELIGIBILITY_LIMIT)
-                : 0.0;
+        double eligibleAmount = 0.0;
+        String reason = "";
 
-        String reason = eligible
-                ? "Eligible up to max 5 days"
-                : "No remaining balance";
+        if (eligible) {
+            if (balance <= PolicyConstants.CARRY_FORWARD_ELIGIBILITY_THRESHOLD) {
+                eligibleAmount = balance;
+                reason = String.format("Eligible to carry forward %.1f days", balance);
+            } else {
+                eligibleAmount = PolicyConstants.MAX_CARRY_FORWARD;
+                reason = String.format("Balance %.1f days exceeds threshold. Max %.0f days allowed",
+                        balance, PolicyConstants.MAX_CARRY_FORWARD);
+            }
+        } else {
+            reason = "No remaining balance to carry forward";
+        }
 
-        CarryForwardEligibilityResponse response =
-                new CarryForwardEligibilityResponse();
-
+        CarryForwardEligibilityResponse response = new CarryForwardEligibilityResponse();
         response.setEmployeeId(employeeId);
         response.setEmployeeName(employee.getName());
         response.setYear(year);
@@ -198,55 +226,56 @@ public class CarryForwardService {
     @Transactional
     public double useCarryForward(Long employeeId, Integer year, double daysNeeded) {
 
-        CarryForwardBalance cfBalance =
-                carryForwardBalanceRepository
-                        .findByEmployeeIdAndYear(employeeId, year)
-                        .orElse(null);
+        log.info("📤 [CARRY-FORWARD] Using: employee={}, year={}, days={}",
+                employeeId, year, daysNeeded);
 
-        if (cfBalance == null || cfBalance.getRemaining() <= 0) {
+        CarryForwardBalance balance = carryForwardRepository
+                .findByEmployeeIdAndYear(employeeId, year)
+                .orElse(null);
+
+        if (balance == null || balance.getRemaining() <= 0) {
+            log.warn("   No carry forward available");
             return 0.0;
         }
 
-        double available = cfBalance.getRemaining();
+        double available = balance.getRemaining();
         double daysUsed = Math.min(daysNeeded, available);
 
-        cfBalance.setTotalUsed(cfBalance.getTotalUsed() + daysUsed);
-        cfBalance.setRemaining(cfBalance.getRemaining() - daysUsed);
+        balance.setTotalUsed(balance.getTotalUsed() + daysUsed);
+        balance.setRemaining(balance.getRemaining() - daysUsed);
 
-        carryForwardBalanceRepository.save(cfBalance);
+        carryForwardRepository.save(balance);
+
+        log.info("✅ [CARRY-FORWARD] Used {} days. Remaining: {}",
+                daysUsed, balance.getRemaining());
 
         return daysUsed;
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // HR - GET ALL BALANCES
+    // GET ALL BALANCES (HR View)
     // ═══════════════════════════════════════════════════════════════
 
     @Transactional(readOnly = true)
     public List<CarryForwardBalanceResponse> getAllBalances(Integer year) {
 
-        List<CarryForwardBalance> balances =
-                carryForwardBalanceRepository.findByYear(year);
-
+        List<CarryForwardBalance> balances = carryForwardRepository.findByYear(year);
         List<CarryForwardBalanceResponse> responses = new ArrayList<>();
 
-        for (CarryForwardBalance cf : balances) {
-
+        for (CarryForwardBalance balance : balances) {
             Employee employee = employeeRepository
-                    .findById(cf.getEmployeeId())
+                    .findById(balance.getEmployeeId())
                     .orElse(null);
 
             if (employee == null) continue;
 
-            CarryForwardBalanceResponse response =
-                    new CarryForwardBalanceResponse();
-
-            response.setEmployeeId(cf.getEmployeeId());
+            CarryForwardBalanceResponse response = new CarryForwardBalanceResponse();
+            response.setEmployeeId(balance.getEmployeeId());
             response.setEmployeeName(employee.getName());
             response.setYear(year);
-            response.setTotalCarriedForward(cf.getTotalCarriedForward());
-            response.setTotalUsed(cf.getTotalUsed());
-            response.setRemaining(cf.getRemaining());
+            response.setTotalCarriedForward(balance.getTotalCarriedForward());
+            response.setTotalUsed(balance.getTotalUsed());
+            response.setRemaining(balance.getRemaining());
 
             responses.add(response);
         }

@@ -22,16 +22,6 @@ public class Employee {
 
     private boolean active = true;
 
-    @Column(name = "total_working_days")
-    private Integer totalWorkingDays = 0;
-
-    public Integer getTotalWorkingDays() {
-        return totalWorkingDays;
-    }
-
-    public void setTotalWorkingDays(Integer totalWorkingDays) {
-        this.totalWorkingDays = totalWorkingDays;
-    }
 
     public Long getId() {
         return id;

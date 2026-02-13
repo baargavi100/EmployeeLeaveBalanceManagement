@@ -1,10 +1,7 @@
 package com.example.notificationservice.controller;
 
-import com.example.notificationservice.dto.NotificationRequest;
 import com.example.notificationservice.dto.NotificationResponse;
-import com.example.notificationservice.entity.Notification;
 import com.example.notificationservice.service.NotificationService;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 

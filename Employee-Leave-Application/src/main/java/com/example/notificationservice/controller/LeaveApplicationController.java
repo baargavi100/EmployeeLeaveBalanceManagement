@@ -1,122 +1,187 @@
+// ═══════════════════════════════════════════════════════════════════
+// FILE: LeaveApplicationController.java (FIXED)
+// Location: src/main/java/com/example/notificationservice/controller/
+// ═══════════════════════════════════════════════════════════════════
+
 package com.example.notificationservice.controller;
 
-import com.example.notificationservice.dto.LeaveResponse;
-import com.example.notificationservice.entity.LeaveAllocation;
+import com.example.notificationservice.dto.LeaveApprovalSimulationResponse;
 import com.example.notificationservice.entity.LeaveApplication;
-import com.example.notificationservice.entity.LeaveAttachment;
-import com.example.notificationservice.enums.HalfDayType;
-import com.example.notificationservice.enums.LeaveType;
-import com.example.notificationservice.service.LeaveAllocationService;
-import com.example.notificationservice.service.LeaveApplicationService;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.format.annotation.DateTimeFormat;
-import org.springframework.http.HttpStatus;
+import com.example.notificationservice.enums.LeaveStatus;
+import com.example.notificationservice.enums.Role;
+import com.example.notificationservice.repository.LeaveApplicationRepository;
+import com.example.notificationservice.service.LeaveApprovalService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.server.ResponseStatusException;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.time.LocalDate;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/leaves")
-
+@RequestMapping("/api/leave-application")
+@CrossOrigin(origins = "*")
+@RequiredArgsConstructor
+@Slf4j
 public class LeaveApplicationController {
 
-    private final LeaveApplicationService leaveApplicationService;
-    private final LeaveAllocationService leaveAllocationService;
-    public LeaveApplicationController(LeaveApplicationService leaveApplicationService,
-                                      LeaveAllocationService leaveAllocationService){
-        this.leaveApplicationService=leaveApplicationService;
-        this.leaveAllocationService=leaveAllocationService;
-    }
+    private final LeaveApplicationRepository leaveApplicationRepository;
+    private final LeaveApprovalService leaveApprovalService;
 
+    // ═══════════════════════════════════════════════════════════════
+    // SIMULATE APPROVAL (Preview)
+    // ═══════════════════════════════════════════════════════════════
 
-    @Value("${file.upload-dir:uploads/leaves}")
-    private String uploadDir;
+    /**
+     * SIMULATE APPROVAL
+     * GET /api/leave-application/{leaveId}/simulate
+     *
+     * Shows what will happen before actual approval
+     */
+    @GetMapping("/{leaveId}/simulate")
+    public ResponseEntity<?> simulateApproval(@PathVariable Long leaveId) {
 
+        log.info("[SIMULATE] Simulating approval for leave: {}", leaveId);
 
-    @PostMapping(value = "/apply", consumes = "multipart/form-data")
-    public LeaveResponse applyLeave(
-            @RequestParam Long employeeId,
-            @RequestParam String leaveType,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
-            @RequestParam String reason,
-            @RequestParam(required = false) String halfDayType,
-            @RequestParam(defaultValue = "false") boolean confirmLossOfPay, // 👈 NEW PARAMETER
-            @RequestParam(required = false) MultipartFile[] files
-    ) throws IOException {
-
-        LeaveType type;
         try {
-            type = LeaveType.valueOf(leaveType.toUpperCase());
-        } catch (IllegalArgumentException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid leave type");
+            LeaveApprovalSimulationResponse simulation =
+                    leaveApprovalService.simulateApproval(leaveId);
+
+            return ResponseEntity.ok(simulation);
+
+        } catch (Exception e) {
+            log.error("[SIMULATE] Error simulating approval: {}", e.getMessage());
+            return ResponseEntity.badRequest()
+                    .body("Error: " + e.getMessage());
         }
-
-        LeaveApplication leave = new LeaveApplication();
-        leave.setEmployeeId(employeeId);
-        leave.setLeaveType(type);
-        leave.setStartDate(startDate);
-        leave.setEndDate(endDate);
-        leave.setReason(reason);
-
-        if (halfDayType != null && !halfDayType.isEmpty()) {
-            leave.setHalfDayType(HalfDayType.valueOf(halfDayType.toUpperCase()));
-        }
-
-        // File handling logic...
-        if (files != null && files.length > 0) {
-            Path uploadPath = Paths.get(uploadDir);
-            Files.createDirectories(uploadPath);
-            List<LeaveAttachment> attachments = new ArrayList<>();
-            for (MultipartFile file : files) {
-                if (file.isEmpty()) continue;
-                String uniqueName = UUID.randomUUID() + "_" + file.getOriginalFilename();
-                Files.write(uploadPath.resolve(uniqueName), file.getBytes());
-                LeaveAttachment attachment = new LeaveAttachment();
-                attachment.setFileUrl(uniqueName);
-                attachment.setLeaveApplication(leave);
-                attachments.add(attachment);
-            }
-            leave.setAttachments(attachments);
-        }
-
-        // 🔹 Pass the confirmation flag to the service
-        LeaveResponse response = leaveApplicationService.applyLeave(leave, confirmLossOfPay);
-
-        // Clean up circular reference for JSON response
-        if (response.getLeaveApplication() != null && response.getLeaveApplication().getAttachments() != null) {
-            response.getLeaveApplication().getAttachments().forEach(a -> a.setLeaveApplication(null));
-        }
-
-        return response;
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // APPROVE LEAVE
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * APPROVE LEAVE
+     * POST /api/leave-application/{leaveId}/approve?approverId=1&approverRole=MANAGER&useCompOff=true&allowLOP=false
+     */
+    @PostMapping("/{leaveId}/approve")
+    public ResponseEntity<?> approveLeave(
+            @PathVariable Long leaveId,
+            @RequestParam Long approverId,
+            @RequestParam Role approverRole,
+            @RequestParam(required = false) Boolean useCompOff,
+            @RequestParam(required = false) Boolean allowLOP) {
+
+        log.info("[APPROVE] Approving leave: {}", leaveId);
+
+        try {
+            leaveApprovalService.approveLeave(leaveId, approverId, approverRole, useCompOff, allowLOP);
+            return ResponseEntity.ok("Leave approved successfully");
+
+        } catch (Exception e) {
+            log.error("[APPROVE] Error approving leave: {}", e.getMessage());
+            return ResponseEntity.badRequest()
+                    .body("Error: " + e.getMessage());
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // REJECT LEAVE
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * REJECT LEAVE
+     * POST /api/leave-application/{leaveId}/reject?approverId=1&approverRole=MANAGER
+     */
+    @PostMapping("/{leaveId}/reject")
+    public ResponseEntity<?> rejectLeave(
+            @PathVariable Long leaveId,
+            @RequestParam Long approverId,
+            @RequestParam Role approverRole) {
+
+        log.info("[REJECT] Rejecting leave: {}", leaveId);
+
+        try {
+            leaveApprovalService.rejectLeave(leaveId, approverId, approverRole);
+            return ResponseEntity.ok("Leave rejected successfully");
+
+        } catch (Exception e) {
+            log.error("[REJECT] Error rejecting leave: {}", e.getMessage());
+            return ResponseEntity.badRequest()
+                    .body("Error: " + e.getMessage());
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // CANCEL LEAVE
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * CANCEL LEAVE
+     * POST /api/leave-application/{leaveId}/cancel
+     */
+    @PostMapping("/{leaveId}/cancel")
+    public ResponseEntity<?> cancelLeave(@PathVariable Long leaveId) {
+
+        log.info("[CANCEL] Cancelling leave: {}", leaveId);
+
+        try {
+            leaveApprovalService.cancelLeave(leaveId);
+            return ResponseEntity.ok("Leave cancelled successfully");
+
+        } catch (Exception e) {
+            log.error("[CANCEL] Error cancelling leave: {}", e.getMessage());
+            return ResponseEntity.badRequest()
+                    .body("Error: " + e.getMessage());
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // QUERY METHODS
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * GET BY EMPLOYEE ID
+     * GET /api/leave-application/employee/{employeeId}
+     */
     @GetMapping("/employee/{employeeId}")
-    public List<LeaveApplication> getEmployeeLeaves(@PathVariable Long employeeId) {
-        return leaveApplicationService.getLeavesByEmployee(employeeId);
+    public ResponseEntity<List<LeaveApplication>> findByEmployeeId(
+            @PathVariable Long employeeId) {
+
+        List<LeaveApplication> applications =
+                leaveApplicationRepository.findByEmployeeIdOrderByCreatedAtDesc(employeeId);
+        return ResponseEntity.ok(applications);
     }
 
-    @PostMapping ("/cancel/{id}")
-    public ResponseEntity<String> cancelEmployeeLeave(
-            @PathVariable Long id,
-            @RequestParam Long employeeId
-    ) {
-        leaveApplicationService.cancelEmployeeLeave(id, employeeId);
-        return ResponseEntity.ok("Leave cancelled successfully.");
+    /**
+     * GET BY STATUS
+     * GET /api/leave-application/status/{status}?employeeId=2
+     */
+    @GetMapping("/status/{status}")
+    public ResponseEntity<List<LeaveApplication>> findByStatus(
+            @PathVariable LeaveStatus status,
+            @RequestParam(required = false) Long employeeId) {
+
+        if (employeeId != null) {
+            List<LeaveApplication> applications =
+                    leaveApplicationRepository.findByEmployeeIdAndStatus(employeeId, status);
+            return ResponseEntity.ok(applications);
+        } else {
+            // Find all by status (for admin/HR)
+            return ResponseEntity.ok(List.of());
+        }
     }
 
-    @PostMapping("/allocations")
-    public LeaveAllocation create(@RequestBody LeaveAllocation leaveAllocation){
-        return leaveAllocationService.createEmployeeAllocation(leaveAllocation);
+    /**
+     * GET PENDING LEAVES FOR MANAGER
+     * GET /api/leave-application/manager/{managerId}/pending
+     */
+    @GetMapping("/manager/{managerId}/pending")
+    public ResponseEntity<List<LeaveApplication>> findPendingLeavesForManager(
+            @PathVariable Long managerId) {
+
+        List<LeaveApplication> pending =
+                leaveApplicationRepository.findPendingTeamRequests(managerId);
+        return ResponseEntity.ok(pending);
     }
 }

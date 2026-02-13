@@ -1,253 +1,298 @@
+
 package com.example.notificationservice.service;
 
-import com.example.notificationservice.component.HolidayChecker;
-import com.example.notificationservice.dto.LeaveResponse;
-import com.example.notificationservice.entity.CompOff;
-import com.example.notificationservice.entity.Employee;
-import com.example.notificationservice.entity.LeaveApplication;
-import com.example.notificationservice.enums.*;
-import com.example.notificationservice.exceptions.BadRequestException;
-import com.example.notificationservice.repository.CompOffRepository;
-import com.example.notificationservice.repository.EmployeeRepository;
-import com.example.notificationservice.repository.LeaveApplicationRepository;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import java.math.BigDecimal;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.List;
 
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.example.notificationservice.entity.LeaveApplication;
+import com.example.notificationservice.enums.HalfDayType;
+import com.example.notificationservice.enums.LeaveStatus;
+import com.example.notificationservice.repository.EmployeeRepository;
+import com.example.notificationservice.repository.LeaveApplicationRepository;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
 @Service
+@RequiredArgsConstructor
+@Slf4j
+@Transactional(readOnly = true)
 public class LeaveApplicationService {
 
     private final LeaveApplicationRepository leaveApplicationRepository;
-    private final NotificationService notificationService;
     private final EmployeeRepository employeeRepository;
-    private final HolidayChecker holidayChecker;
-    private final CompOffService compOffService;
-    private final CompOffRepository compOffRepository;
 
-    private final String SERVER_IP = "192.168.1.62";
-    private final String SERVER_PORT = "8080";
+    // ═══════════════════════════════════════════════════════════════
+    // CREATE LEAVE APPLICATION
+    // ═══════════════════════════════════════════════════════════════
 
-
-    public LeaveApplicationService(
-            LeaveApplicationRepository leaveApplicationRepository,
-            NotificationService notificationService,
-            EmployeeRepository employeeRepository,
-            HolidayChecker holidayChecker,
-            CompOffService compOffService,
-            CompOffRepository compOffRepository
-    ) {
-        this.leaveApplicationRepository = leaveApplicationRepository;
-        this.notificationService = notificationService;
-        this.employeeRepository = employeeRepository;
-        this.holidayChecker = holidayChecker;
-        this.compOffService = compOffService;
-        this.compOffRepository = compOffRepository;
-    }
-
-
+    /**
+     * Create a new leave application
+     */
     @Transactional
-    public LeaveResponse applyLeave(LeaveApplication leave, boolean confirmLossOfPay)
-    {
-        checkLeaveOverlap(leave);
-        if (leave.getEndDate().isBefore(leave.getStartDate())) {
-            throw new BadRequestException(  "End date cannot be before start date");
-        }
+    public LeaveApplication createLeaveApplication(LeaveApplication leaveApplication) {
 
-        // 2️⃣ Calculate leave days (holiday + half-day aware)
-        BigDecimal calculatedDays = calculateLeaveDuration(leave);
+        log.info("📝 [CREATE] Creating leave application for employee: {}",
+                leaveApplication.getEmployeeId());
 
-        // 3️⃣ Check balance (Comp-Off / LOP logic)
-        String warning = checkBalanceAndGetWarning(leave, calculatedDays);
+        // Validate employee exists
+        employeeRepository.findById(leaveApplication.getEmployeeId())
+                .orElseThrow(() -> new RuntimeException(
+                        "Employee not found: " + leaveApplication.getEmployeeId()));
 
-        if (warning != null && !confirmLossOfPay) {
-            return new LeaveResponse(null, warning);
-        }
-
-        // 4️⃣ Set calculated fields
-        leave.setDays(calculatedDays);
-        leave.setStatus(LeaveStatus.PENDING);
-
-        LeaveApplication savedLeave =
-                leaveApplicationRepository.save(leave);
-
-        if (leave.getLeaveType() == LeaveType.COMP_OFF && warning == null) {
-            compOffService.useCompOff(
-                    leave.getEmployeeId(),
-                    calculatedDays,
-                    savedLeave.getId()
+        // Calculate days if not provided
+        if (leaveApplication.getDays() == null) {
+            BigDecimal calculatedDays = calculateLeaveDays(
+                    leaveApplication.getStartDate(),
+                    leaveApplication.getEndDate(),
+                    leaveApplication.getHalfDayType()
             );
+            leaveApplication.setDays(calculatedDays);
         }
-        notifyManager(savedLeave);
-        return new LeaveResponse(savedLeave, null);
+
+        // Set initial status
+        leaveApplication.setStatus(LeaveStatus.PENDING);
+
+        // Auto-populate year from start date
+        if (leaveApplication.getStartDate() != null) {
+            leaveApplication.setYear(leaveApplication.getStartDate().getYear());
+        }
+
+        LeaveApplication saved = leaveApplicationRepository.save(leaveApplication);
+
+        log.info("✅ [CREATE] Leave application created: ID={}, Days={}",
+                saved.getId(), saved.getDays());
+
+        return saved;
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // CALCULATE LEAVE DAYS (Excludes weekends)
+    // ═══════════════════════════════════════════════════════════════
 
-    private void notifyManager(LeaveApplication leave) {
+    /**
+     * Calculate number of leave days between start and end date
+     * Excludes weekends (Saturday & Sunday)
+     * Handles half-day leaves
+     */
+    private BigDecimal calculateLeaveDays(LocalDate startDate, LocalDate endDate,
+                                          HalfDayType halfDayType) {
 
-        Employee employee = employeeRepository.findById(leave.getEmployeeId())
-                .orElseThrow(() -> new RuntimeException("Employee not found"));
+        if (startDate == null || endDate == null) {
+            throw new RuntimeException("Start date and end date are required");
+        }
 
-        Employee manager = employeeRepository.findById(employee.getManagerId())
-                .orElseThrow(() -> new RuntimeException("Manager not found"));
+        if (endDate.isBefore(startDate)) {
+            throw new RuntimeException("End date cannot be before start date");
+        }
 
-        notificationService.createNotification(
-                manager.getId(),
-                manager.getEmail(),
-                EventType.LEAVE_APPLIED,
-                manager.getRole(),
-                Channel.EMAIL,
-                "Employee " + employee.getName()
-                        + " applied leave from "
-                        + leave.getStartDate()
-                        + " to "
-                        + leave.getEndDate()
+        // Handle half-day
+        if (halfDayType != null) {
+            return BigDecimal.valueOf(0.5);
+        }
+
+        // Count working days (exclude weekends)
+        long totalDays = 0;
+        LocalDate current = startDate;
+
+        while (!current.isAfter(endDate)) {
+            DayOfWeek dayOfWeek = current.getDayOfWeek();
+
+            // Exclude Saturday and Sunday
+            if (dayOfWeek != DayOfWeek.SATURDAY && dayOfWeek != DayOfWeek.SUNDAY) {
+                totalDays++;
+            }
+
+            current = current.plusDays(1);
+        }
+
+        log.info("   Calculated days: {} (from {} to {})", totalDays, startDate, endDate);
+
+        return BigDecimal.valueOf(totalDays);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // QUERY METHODS
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Find leave application by ID
+     */
+    public LeaveApplication findById(Long id) {
+        return leaveApplicationRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Leave application not found: " + id));
+    }
+
+    /**
+     * Find all leave applications for employee
+     */
+    public List<LeaveApplication> findByEmployeeId(Long employeeId) {
+        return leaveApplicationRepository.findByEmployeeIdOrderByCreatedAtDesc(employeeId);
+    }
+
+    /**
+     * Find leave applications by employee and status
+     */
+    public List<LeaveApplication> findByEmployeeIdAndStatus(Long employeeId, LeaveStatus status) {
+        return leaveApplicationRepository.findByEmployeeIdAndStatus(employeeId, status);
+    }
+
+    /**
+     * Find leave applications by employee and year
+     */
+    public List<LeaveApplication> findByEmployeeIdAndYear(Long employeeId, Integer year) {
+        return leaveApplicationRepository.findByEmployeeIdAndYear(employeeId, year);
+    }
+
+    /**
+     * Find pending leave applications for employee
+     */
+    public List<LeaveApplication> findPendingLeaves(Long employeeId) {
+        return leaveApplicationRepository.findByEmployeeIdAndStatusOrderByCreatedAtDesc(
+                employeeId, LeaveStatus.PENDING);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // UPDATE LEAVE APPLICATION
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Update leave application (before approval)
+     */
+    @Transactional
+    public LeaveApplication updateLeaveApplication(Long leaveId, LeaveApplication updates) {
+
+        log.info("📝 [UPDATE] Updating leave application: {}", leaveId);
+
+        LeaveApplication existing = findById(leaveId);
+
+        // Only allow updates if status is PENDING
+        if (existing.getStatus() != LeaveStatus.PENDING) {
+            throw new RuntimeException("Cannot update leave in status: " + existing.getStatus());
+        }
+
+        // Update fields
+        if (updates.getStartDate() != null) {
+            existing.setStartDate(updates.getStartDate());
+        }
+        if (updates.getEndDate() != null) {
+            existing.setEndDate(updates.getEndDate());
+        }
+        if (updates.getLeaveType() != null) {
+            existing.setLeaveType(updates.getLeaveType());
+        }
+        if (updates.getHalfDayType() != null) {
+            existing.setHalfDayType(updates.getHalfDayType());
+        }
+        if (updates.getReason() != null) {
+            existing.setReason(updates.getReason());
+        }
+
+        // Recalculate days
+        BigDecimal calculatedDays = calculateLeaveDays(
+                existing.getStartDate(),
+                existing.getEndDate(),
+                existing.getHalfDayType()
         );
+        existing.setDays(calculatedDays);
+
+        // Update year
+        existing.setYear(existing.getStartDate().getYear());
+
+        LeaveApplication saved = leaveApplicationRepository.save(existing);
+
+        log.info("✅ [UPDATE] Leave application updated: Days={}", saved.getDays());
+
+        return saved;
     }
 
-    private void checkLeaveOverlap(LeaveApplication leave) {
+    // ═══════════════════════════════════════════════════════════════
+    // DELETE LEAVE APPLICATION
+    // ═══════════════════════════════════════════════════════════════
 
-        List<LeaveApplication> overlaps =
-                leaveApplicationRepository.findOverlappingLeaves(
-                        leave.getEmployeeId().longValue(),
-                        leave.getStartDate(),
-                        leave.getEndDate()
-                );
-
-        if (!overlaps.isEmpty()) {
-            throw new BadRequestException("Leave dates overlap with an existing leave");
-        }
-    }
-
-
-
-
-
-    public List<LeaveApplication> getLeavesByEmployee(Long employeeId) {
-        return leaveApplicationRepository.findByEmployeeId(employeeId);
-    }
-
-
+    /**
+     * Delete leave application (only if PENDING)
+     */
     @Transactional
-    public LeaveResponse applyAdminLeave(LeaveApplication leave, boolean isConfirmed) {
-        validateDates(leave);
-        BigDecimal calculatedDays = calculateLeaveDuration(leave);
-        String warning = checkBalanceAndGetWarning(leave, calculatedDays);
+    public void deleteLeaveApplication(Long leaveId) {
 
-        if (warning != null && !isConfirmed) {
-            return new LeaveResponse(null, warning);
+        log.info("🗑️ [DELETE] Deleting leave application: {}", leaveId);
+
+        LeaveApplication leave = findById(leaveId);
+
+        // Only allow deletion if status is PENDING
+        if (leave.getStatus() != LeaveStatus.PENDING) {
+            throw new RuntimeException(
+                    "Cannot delete leave in status: " + leave.getStatus() +
+                            ". Use cancel instead.");
         }
 
-        leave.setDays(calculatedDays);
-        leave.setStatus(LeaveStatus.APPROVED);
-        processAttachments(leave);
+        leaveApplicationRepository.delete(leave);
 
-        LeaveApplication savedLeave = leaveApplicationRepository.save(leave);
-
-        if (leave.getLeaveType() == LeaveType.COMP_OFF && warning == null) {
-            compOffService.useCompOff(leave.getEmployeeId().longValue(), calculatedDays, savedLeave.getId());
-        }
-
-        return new LeaveResponse(savedLeave, null);
+        log.info("✅ [DELETE] Leave application deleted");
     }
 
-    // --- 🛠️ CANCELLATION LOGIC ---
+    // ═══════════════════════════════════════════════════════════════
+    // VALIDATION: Check for overlapping leaves
+    // ═══════════════════════════════════════════════════════════════
 
-    @Transactional
-    public void cancelAdminLeave(Long applicationId) {
-        LeaveApplication leave = leaveApplicationRepository.findById(applicationId)
-                .orElseThrow(() -> new BadRequestException("Leave application not found with ID: " + applicationId));
-        performCancellation(leave);
-    }
+    /**
+     * Check if employee has overlapping leave applications
+     */
+    public boolean hasOverlappingLeaves(Long employeeId, LocalDate startDate, LocalDate endDate) {
 
-    @Transactional
-    public void cancelEmployeeLeave(Long applicationId, Long employeeId) {
-        LeaveApplication leave = leaveApplicationRepository.findById(applicationId)
-                .orElseThrow(() -> new BadRequestException("Leave application not found with ID: " + applicationId));
+        log.info("🔍 [VALIDATE] Checking overlapping leaves for employee: {}", employeeId);
 
-        if (leave.getEmployeeId().longValue() != employeeId) {
-            throw new BadRequestException(
-                    "Unauthorized: You cannot cancel another employee's leave."
-            );
-        }
+        List<LeaveApplication> existingLeaves = leaveApplicationRepository
+                .findByEmployeeIdAndStatus(employeeId, LeaveStatus.APPROVED);
 
+        for (LeaveApplication existing : existingLeaves) {
+            // Check if dates overlap
+            boolean overlaps = !endDate.isBefore(existing.getStartDate()) &&
+                    !startDate.isAfter(existing.getEndDate());
 
-
-        if (leave.getStatus() == LeaveStatus.REJECTED || leave.getStatus() == LeaveStatus.CANCELLED) {
-            throw new BadRequestException("Leave is already finalized as " + leave.getStatus());
-        }
-        performCancellation(leave);
-    }
-
-    private void performCancellation(LeaveApplication leave) {
-        // 🔄 REVERSAL: Restore Comp-Off credits if they were deducted for APPROVED or PENDING leaves
-        if (leave.getLeaveType() == LeaveType.COMP_OFF &&
-                (leave.getStatus() == LeaveStatus.APPROVED || leave.getStatus() == LeaveStatus.PENDING)) {
-
-            List<CompOff> linkedCredits = compOffRepository.findByUsedLeaveApplicationId(leave.getId());
-
-            BigDecimal restoredDays = BigDecimal.ZERO;
-
-            for (CompOff credit : linkedCredits) {
-                credit.setStatus(CompOffStatus.EARNED);
-                credit.setUsedLeaveApplicationId(null);
-                compOffRepository.save(credit);
-            }
-            if (restoredDays.compareTo(BigDecimal.ZERO) > 0) {
-                compOffService.restoreCompOffBalance(
-                        leave.getEmployeeId().longValue(),
-                        restoredDays
-                );
+            if (overlaps) {
+                log.warn("   Overlapping leave found: {} to {}",
+                        existing.getStartDate(), existing.getEndDate());
+                return true;
             }
         }
 
-        leave.setStatus(LeaveStatus.CANCELLED);
-        leaveApplicationRepository.save(leave);
+        log.info("   No overlapping leaves found");
+        return false;
     }
 
-    // --- 🛠️ HELPERS ---
+    // ═══════════════════════════════════════════════════════════════
+    // STATISTICS
+    // ═══════════════════════════════════════════════════════════════
 
-    private String checkBalanceAndGetWarning(LeaveApplication leave, BigDecimal calculatedDays) {
-        if (leave.getLeaveType() == LeaveType.COMP_OFF) {
-            BigDecimal available = compOffService.getAvailableCompOffDays(leave.getEmployeeId().longValue());
-            if (available.compareTo(calculatedDays) < 0) {
-                return "Insufficient leave balance (Available: " + available + "). The request will use carry-forwarded leave from the previous year or proceed as Loss of Pay.";
-            }
-        }
-        return null;
+    /**
+     * Get total approved days for employee in year
+     */
+    public Double getTotalApprovedDays(Long employeeId, Integer year) {
+        Double total = leaveApplicationRepository.getTotalUsedDays(
+                employeeId, LeaveStatus.APPROVED, year);
+        return total != null ? total : 0.0;
     }
 
-    private void validateDates(LeaveApplication leave) {
-        if (leave.getEndDate().isBefore(leave.getStartDate())) {
-            throw new BadRequestException("End date cannot be before start date");
-        }
+    /**
+     * Get total approved days for employee in specific month
+     */
+    public Double getTotalApprovedDaysInMonth(Long employeeId, Integer year, Integer month) {
+        Double total = leaveApplicationRepository.getTotalApprovedDaysInMonth(
+                employeeId, year, month);
+        return total != null ? total : 0.0;
     }
 
-    private void processAttachments(LeaveApplication leave) {
-        if (leave.getAttachments() != null) {
-            leave.getAttachments().forEach(attachment -> {
-                attachment.setFileUrl("http://" + SERVER_IP + ":" + SERVER_PORT + "/uploads/leaves/" + attachment.getFileUrl());
-                attachment.setLeaveApplication(leave);
-            });
-        }
-    }
-
-    public BigDecimal calculateLeaveDuration(LeaveApplication leave) {
-        BigDecimal total = BigDecimal.ZERO;
-        LocalDate date = leave.getStartDate();
-        while (!date.isAfter(leave.getEndDate())) {
-            if (!holidayChecker.isNonWorkingDay(date)) {
-                BigDecimal inc = (leave.getLeaveType() == LeaveType.HALF_DAY || (leave.getHalfDayType() != null && date.equals(leave.getEndDate())))
-                        ? new BigDecimal("0.5") : BigDecimal.ONE;
-                total = total.add(inc);
-            }
-            date = date.plusDays(1);
-        }
-        if (total.compareTo(BigDecimal.ZERO) == 0) throw new BadRequestException("Selected dates are non-working days.");
-        return total;
+    /**
+     * Count leave applications by status
+     */
+    public Integer countByStatus(Long employeeId, Integer year, LeaveStatus status) {
+        return leaveApplicationRepository.countByStatus(employeeId, year, status);
     }
 }
-
-
