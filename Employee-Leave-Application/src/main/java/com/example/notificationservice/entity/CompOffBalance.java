@@ -1,7 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════
 // FILE: CompOffBalance.java
 // Location: src/main/java/com/example/notificationservice/entity/
-// IMPORTANT: CompOff is EARNED (not allocated in leave_allocation)
 // ═══════════════════════════════════════════════════════════════════
 
 package com.example.notificationservice.entity;
@@ -17,10 +16,12 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import lombok.Data;
 
 @Entity
 @Table(name = "comp_off_balance",
-    uniqueConstraints = @UniqueConstraint(columnNames = {"employee_id", "lop_year"}))
+        uniqueConstraints = @UniqueConstraint(columnNames = {"employee_id", "lop_year"}))
+@Data
 public class CompOffBalance {
 
     @Id
@@ -30,105 +31,47 @@ public class CompOffBalance {
     @Column(name = "employee_id", nullable = false)
     private Long employeeId;
 
-    // Use non-reserved column name
-    @Column(name = "lop_year", nullable = false)
+    @Column(name = "lop_year", nullable = false)  // ✅ Matches H2 column name
     private Integer year;
 
-    /**
-     * CompOff days earned (by working extra hours/holidays)
-     */
-    @Column(name = "earned", nullable = false)
+    @Column(nullable = false)
     private Double earned = 0.0;
 
-    /**
-     * CompOff days used
-     */
-    @Column(name = "used", nullable = false)
+    @Column(nullable = false)
     private Double used = 0.0;
 
-    /**
-     * Balance = earned - used
-     */
-    @Column(name = "balance", nullable = false)
+    @Column(nullable = false)
     private Double balance = 0.0;
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
-    /**
-     * Calculate balance automatically
-     * Balance cannot be negative
-     */
-    public void calculateBalance() {
-        this.balance = Math.max(this.earned - this.used, 0.0);
-    }
-
     @PrePersist
     @PreUpdate
-    protected void onUpdate() {
+    public void calculateBalance() {
+        this.balance = this.earned - this.used;
         this.updatedAt = LocalDateTime.now();
-        calculateBalance();
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // GETTERS AND SETTERS
-    // ═══════════════════════════════════════════════════════════════
+    // Explicit getters and setters
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
 
-    public Long getId() {
-        return id;
-    }
+    public Long getEmployeeId() { return employeeId; }
+    public void setEmployeeId(Long employeeId) { this.employeeId = employeeId; }
 
-    public void setId(Long id) {
-        this.id = id;
-    }
+    public Integer getYear() { return year; }
+    public void setYear(Integer year) { this.year = year; }
 
-    public Long getEmployeeId() {
-        return employeeId;
-    }
+    public Double getEarned() { return earned; }
+    public void setEarned(Double earned) { this.earned = earned; }
 
-    public void setEmployeeId(Long employeeId) {
-        this.employeeId = employeeId;
-    }
+    public Double getUsed() { return used; }
+    public void setUsed(Double used) { this.used = used; }
 
-    public Integer getYear() {
-        return year;
-    }
+    public Double getBalance() { return balance; }
+    public void setBalance(Double balance) { this.balance = balance; }
 
-    public void setYear(Integer year) {
-        this.year = year;
-    }
-
-    public Double getEarned() {
-        return earned;
-    }
-
-    public void setEarned(Double earned) {
-        this.earned = earned;
-        calculateBalance();
-    }
-
-    public Double getUsed() {
-        return used;
-    }
-
-    public void setUsed(Double used) {
-        this.used = used;
-        calculateBalance();
-    }
-
-    public Double getBalance() {
-        return balance;
-    }
-
-    public void setBalance(Double balance) {
-        this.balance = balance;
-    }
-
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
-    }
+    public LocalDateTime getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

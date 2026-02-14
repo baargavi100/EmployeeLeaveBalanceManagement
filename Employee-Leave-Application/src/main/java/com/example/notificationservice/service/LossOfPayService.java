@@ -3,6 +3,8 @@ package com.example.notificationservice.service;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -10,12 +12,12 @@ import com.example.notificationservice.entity.LossOfPayRecord;
 import com.example.notificationservice.repository.LossOfPayRecordRepository;
 
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 
 @Service
 @RequiredArgsConstructor
-@Slf4j
 public class LossOfPayService {
+
+    private static final Logger log = LoggerFactory.getLogger(LossOfPayService.class);
     // In LossOfPayService.java
     public void applyMonthlyLimitViolation(Long employeeId, int year, int month) {
         // Implement logic to handle LOP limit violations

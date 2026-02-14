@@ -6,6 +6,8 @@ import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,13 +18,13 @@ import com.example.notificationservice.repository.EmployeeRepository;
 import com.example.notificationservice.repository.LeaveApplicationRepository;
 
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 
 @Service
 @RequiredArgsConstructor
-@Slf4j
 @Transactional(readOnly = true)
 public class LeaveApplicationService {
+    
+    private static final Logger log = LoggerFactory.getLogger(LeaveApplicationService.class);
 
     private final LeaveApplicationRepository leaveApplicationRepository;
     private final EmployeeRepository employeeRepository;

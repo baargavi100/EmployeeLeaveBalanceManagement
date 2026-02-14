@@ -161,6 +161,30 @@ public class EmployeeDashboardResponse {
         this.lossOfPayPercentage = lossOfPayPercentage;
     }
 
+    public Integer getApprovedCount() {
+        return 0; // Default value
+    }
+
+    public void setApprovedCount(Integer count) {
+        // Placeholder
+    }
+
+    public Integer getRejectedCount() {
+        return 0; // Default value
+    }
+
+    public void setRejectedCount(Integer count) {
+        // Placeholder
+    }
+
+    public Integer getPendingCount() {
+        return 0; // Default value
+    }
+
+    public void setPendingCount(Integer count) {
+        // Placeholder
+    }
+
     public LocalDateTime getLastUpdated() {
         return lastUpdated;
     }

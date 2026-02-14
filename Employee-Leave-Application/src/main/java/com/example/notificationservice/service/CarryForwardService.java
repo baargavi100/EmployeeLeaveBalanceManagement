@@ -5,6 +5,14 @@
 
 package com.example.notificationservice.service;
 
+import java.util.ArrayList;
+import java.util.List;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.example.notificationservice.constants.PolicyConstants;
 import com.example.notificationservice.dto.CarryForwardBalanceResponse;
 import com.example.notificationservice.dto.CarryForwardEligibilityResponse;
@@ -16,18 +24,14 @@ import com.example.notificationservice.repository.CarryForwardBalanceRepository;
 import com.example.notificationservice.repository.EmployeeRepository;
 import com.example.notificationservice.repository.LeaveAllocationRepository;
 import com.example.notificationservice.repository.LeaveApplicationRepository;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
-import java.util.List;
+import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
-@Slf4j
 public class CarryForwardService {
+
+    private static final Logger log = LoggerFactory.getLogger(CarryForwardService.class);
 
     private final EmployeeRepository employeeRepository;
     private final LeaveAllocationRepository allocationRepository;
@@ -250,6 +254,37 @@ public class CarryForwardService {
                 daysUsed, balance.getRemaining());
 
         return daysUsed;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // RESTORE CARRY FORWARD (When leave cancelled/rejected)
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Restore carry forward days (when leave is cancelled/rejected)
+     */
+    @Transactional
+    public void restoreCarryForward(Long employeeId, Integer year, Double days) {
+
+        log.info("🔄 [CARRY-FORWARD] Restoring: employee={}, year={}, days={}",
+                employeeId, year, days);
+
+        CarryForwardBalance balance = carryForwardRepository
+                .findByEmployeeIdAndYear(employeeId, year)
+                .orElse(null);
+
+        if (balance == null) {
+            log.warn("   No carry forward balance found to restore");
+            return;
+        }
+
+        balance.setTotalUsed(Math.max(balance.getTotalUsed() - days, 0.0));
+        balance.setRemaining(balance.getTotalCarriedForward() - balance.getTotalUsed());
+
+        carryForwardRepository.save(balance);
+
+        log.info("✅ [CARRY-FORWARD] Restored {} days. New remaining: {}",
+                days, balance.getRemaining());
     }
 
     // ═══════════════════════════════════════════════════════════════

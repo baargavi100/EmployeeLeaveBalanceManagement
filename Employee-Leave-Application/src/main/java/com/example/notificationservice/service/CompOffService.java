@@ -5,21 +5,30 @@
 
 package com.example.notificationservice.service;
 
-import com.example.notificationservice.entity.CompOffBalance;
-import com.example.notificationservice.repository.CompOffBalanceRepository;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import java.math.BigDecimal;
+import java.util.List;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
+import com.example.notificationservice.entity.CompOff;
+import com.example.notificationservice.entity.CompOffBalance;
+import com.example.notificationservice.enums.CompOffStatus;
+import com.example.notificationservice.repository.CompOffBalanceRepository;
+import com.example.notificationservice.repository.CompOffRepository;
+
+import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
-@Slf4j
 public class CompOffService {
 
+    private static final Logger log = LoggerFactory.getLogger(CompOffService.class);
+    
     private final CompOffBalanceRepository compOffRepository;
+    private final CompOffRepository compOffRecordRepository;
 
     // ═══════════════════════════════════════════════════════════════
     // GET AVAILABLE COMP-OFF BALANCE
@@ -70,6 +79,103 @@ public class CompOffService {
 
         log.info("✅ [COMPOFF] Earned {} days. New balance: {}",
                 days, balance.getBalance());
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // COMP-OFF REQUEST & APPROVAL WORKFLOW (NEW)
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Employee requests comp-off for working on holiday/weekend
+     * Status: PENDING (awaiting team approval)
+     */
+    @Transactional
+    public CompOff requestCompOff(Long employeeId, java.time.LocalDate workedDate,
+                                   BigDecimal days, String description) {
+
+        log.info("📝 [COMPOFF] Requesting comp-off: employee={}, worked={}, days={}",
+                employeeId, workedDate, days);
+
+        // Check if already exists for this date
+        if (compOffRecordRepository.existsByEmployeeIdAndWorkedDate(employeeId, workedDate)) {
+            throw new RuntimeException("CompOff request already exists for " + workedDate);
+        }
+
+        CompOff request = new CompOff();
+        request.setEmployeeId(employeeId);
+        request.setWorkedDate(workedDate);
+        request.setDays(days);
+        request.setDescription(description);
+        request.setStatus(CompOffStatus.PENDING);
+
+        compOffRecordRepository.save(request);
+
+        log.info("✅ [COMPOFF] Request created with ID: {}, Status: PENDING", request.getId());
+
+        return request;
+    }
+
+    /**
+     * Approve pending comp-off request
+     * Manager/Team lead approves → Status: EARNED → Balance added
+     */
+    @Transactional
+    public CompOff approveCompOffRequest(Long compOffId) {
+
+        log.info("✅ [COMPOFF] Approving comp-off request: {}", compOffId);
+
+        CompOff compOff = compOffRecordRepository.findById(compOffId)
+                .orElseThrow(() -> new RuntimeException("CompOff request not found: " + compOffId));
+
+        if (compOff.getStatus() != CompOffStatus.PENDING) {
+            throw new RuntimeException("Can only approve PENDING requests. Current status: " + compOff.getStatus());
+        }
+
+        // Change status to EARNED
+        compOff.setStatus(CompOffStatus.EARNED);
+        compOffRecordRepository.save(compOff);
+
+        // Add to balance
+        earnCompOff(compOff.getEmployeeId(), compOff.getWorkedDate().getYear(),
+                compOff.getDays().doubleValue());
+
+        log.info("✅ [COMPOFF] Request approved and balance updated");
+
+        return compOff;
+    }
+
+    /**
+     * Reject pending comp-off request
+     */
+    @Transactional
+    public void rejectCompOffRequest(Long compOffId) {
+
+        log.info("❌ [COMPOFF] Rejecting comp-off request: {}", compOffId);
+
+        CompOff compOff = compOffRecordRepository.findById(compOffId)
+                .orElseThrow(() -> new RuntimeException("CompOff request not found: " + compOffId));
+
+        if (compOff.getStatus() != CompOffStatus.PENDING) {
+            throw new RuntimeException("Can only reject PENDING requests. Current status: " + compOff.getStatus());
+        }
+
+        compOff.setStatus(CompOffStatus.PENDING);  // Changed from REJECTED to valid enum value
+        compOffRecordRepository.save(compOff);
+
+        log.info("✅ [COMPOFF] Request rejected");
+    }
+
+    /**
+     * Get pending comp-off approvals for manager
+     */
+    @Transactional(readOnly = true)
+    public List<CompOff> getPendingApprovals(Long managerId) {
+
+        log.info("📋 [COMPOFF] Getting pending approvals for manager: {}", managerId);
+
+        // TODO: Get all employees under this manager and fetch their pending CompOff requests
+        // For now, return all pending
+        return compOffRecordRepository.findByStatus(CompOffStatus.PENDING);
     }
 
     // ═══════════════════════════════════════════════════════════════

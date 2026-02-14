@@ -57,7 +57,7 @@ public final class PolicyConstants {
 
     /**
      * Total yearly allocation (sum of all leave types)
-     * VACATION(8) + SICK(6) + CASUAL(6) + PERSONAL(4) = 24 days
+    * VACATION(8) + SICK(6) + CASUAL(6) + PERSONAL(4) = 24 days
      */
     public static final double TOTAL_YEARLY_ALLOCATION =
             VACATION_YEARLY_ALLOCATION +

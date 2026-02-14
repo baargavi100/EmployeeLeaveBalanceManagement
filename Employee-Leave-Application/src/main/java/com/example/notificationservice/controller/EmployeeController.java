@@ -8,7 +8,8 @@ package com.example.notificationservice.controller;
 import com.example.notificationservice.entity.Employee;
 import com.example.notificationservice.repository.EmployeeRepository;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -19,8 +20,9 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/employees")
 @RequiredArgsConstructor
-@Slf4j
 public class EmployeeController {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(EmployeeController.class);
 
     private final EmployeeRepository employeeRepo;
 

@@ -8,6 +8,8 @@ package com.example.notificationservice.service;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,12 +23,12 @@ import com.example.notificationservice.enums.Role;
 import com.example.notificationservice.repository.LeaveApplicationRepository;
 
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 
 @Service
 @RequiredArgsConstructor
-@Slf4j
 public class LeaveApprovalService {
+    
+    private static final Logger log = LoggerFactory.getLogger(LeaveApprovalService.class);
 
     private final LeaveApplicationRepository leaveApplicationRepository;
     private final CarryForwardService carryForwardService;
@@ -299,6 +301,32 @@ public class LeaveApprovalService {
         LeaveApplication leave = leaveApplicationRepository.findById(leaveId)
                 .orElseThrow(() -> new RuntimeException("Leave application not found: " + leaveId));
 
+        // Restore any deductions if rejecting an already-applied leave
+        // (edge case: if leave was partially processed)
+        if (leave.getStatus() == LeaveStatus.APPROVED) {
+            // Restore CompOff if used
+            if (leave.getCompOffUsed() != null && leave.getCompOffUsed() > 0) {
+                log.info("   Restoring CompOff on rejection: {} days", leave.getCompOffUsed());
+                compOffService.restoreCompOff(leave.getEmployeeId(), leave.getYear(), leave.getCompOffUsed());
+            }
+
+            // Restore Carry Forward if used
+            if (leave.getCarryForwardUsed() != null && leave.getCarryForwardUsed() > 0) {
+                log.info("   Restoring Carry Forward on rejection: {} days", leave.getCarryForwardUsed());
+                carryForwardService.restoreCarryForward(leave.getEmployeeId(), leave.getYear(), leave.getCarryForwardUsed());
+            }
+
+            // Restore LOP if applied
+            if (leave.getLossOfPayApplied() != null && leave.getLossOfPayApplied() > 0) {
+                log.info("   Restoring LOP on rejection: {}%", leave.getLossOfPayApplied());
+                lossOfPayService.restoreLossOfPay(
+                        leave.getEmployeeId(),
+                        leave.getYear(),
+                        leave.getStartDate().getMonthValue()
+                );
+            }
+        }
+
         leave.setStatus(LeaveStatus.REJECTED);
         leave.setApprovedBy(approverId);
         leave.setApprovedRole(approverRole);
@@ -306,7 +334,7 @@ public class LeaveApprovalService {
 
         leaveApplicationRepository.save(leave);
 
-        log.info("✅ [REJECT] Leave rejected successfully");
+        log.info("✅ [REJECT] Leave rejected successfully with restoration if applicable");
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -334,7 +362,7 @@ public class LeaveApprovalService {
         // Restore Carry Forward if used
         if (leave.getCarryForwardUsed() != null && leave.getCarryForwardUsed() > 0) {
             log.info("   Restoring Carry Forward: {} days", leave.getCarryForwardUsed());
-            // TODO: Implement carryForwardService.restore() if needed
+            carryForwardService.restoreCarryForward(leave.getEmployeeId(), leave.getYear(), leave.getCarryForwardUsed());
         }
 
         // ✅ RESTORE LOP RECORD (delete the monthly LOP entry)

@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════
-// FILE: LossOfPayRecord.java (FIXED - Removed duplicate fields)
+// FILE: LossOfPayRecord.java
 // Location: src/main/java/com/example/notificationservice/entity/
 // ═══════════════════════════════════════════════════════════════════
 
@@ -16,15 +16,12 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import lombok.Data;
 
-/**
- * Entity: Loss of Pay Record
- * Purpose: Track monthly loss of pay (1% per excess day)
- * Table: loss_of_pay_record
- */
 @Entity
 @Table(name = "loss_of_pay_record",
-    uniqueConstraints = @UniqueConstraint(columnNames = {"employee_id", "lop_year", "lop_month"}))
+        uniqueConstraints = @UniqueConstraint(columnNames = {"employee_id", "lop_year", "lop_month"}))
+@Data
 public class LossOfPayRecord {
 
     @Id
@@ -34,22 +31,15 @@ public class LossOfPayRecord {
     @Column(name = "employee_id", nullable = false)
     private Long employeeId;
 
-    // Avoid reserved SQL keywords by using explicit column names
-    @Column(name = "lop_year", nullable = false)
+    @Column(name = "lop_year", nullable = false)  // ✅ Matches H2
     private Integer year;
 
-    @Column(name = "lop_month", nullable = false)
+    @Column(name = "lop_month", nullable = false)  // ✅ Matches H2
     private Integer month;
 
-    /**
-     * Number of excess days beyond monthly limit
-     */
     @Column(name = "excess_days", nullable = false)
     private Double excessDays = 0.0;
 
-    /**
-     * Loss of pay percentage (1% per excess day)
-     */
     @Column(name = "loss_percentage", nullable = false)
     private Double lossPercentage = 0.0;
 
@@ -70,71 +60,28 @@ public class LossOfPayRecord {
         updatedAt = LocalDateTime.now();
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // GETTERS AND SETTERS
-    // ═══════════════════════════════════════════════════════════════
+    // Explicit getters and setters
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
 
-    public Long getId() {
-        return id;
-    }
+    public Long getEmployeeId() { return employeeId; }
+    public void setEmployeeId(Long employeeId) { this.employeeId = employeeId; }
 
-    public void setId(Long id) {
-        this.id = id;
-    }
+    public Integer getYear() { return year; }
+    public void setYear(Integer year) { this.year = year; }
 
-    public Long getEmployeeId() {
-        return employeeId;
-    }
+    public Integer getMonth() { return month; }
+    public void setMonth(Integer month) { this.month = month; }
 
-    public void setEmployeeId(Long employeeId) {
-        this.employeeId = employeeId;
-    }
+    public Double getExcessDays() { return excessDays; }
+    public void setExcessDays(Double excessDays) { this.excessDays = excessDays; }
 
-    public Integer getYear() {
-        return year;
-    }
+    public Double getLossPercentage() { return lossPercentage; }
+    public void setLossPercentage(double lossPercentage) { this.lossPercentage = lossPercentage; }
 
-    public void setYear(Integer year) {
-        this.year = year;
-    }
+    public LocalDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 
-    public Integer getMonth() {
-        return month;
-    }
-
-    public void setMonth(Integer month) {
-        this.month = month;
-    }
-
-    public Double getExcessDays() {
-        return excessDays;
-    }
-
-    public void setExcessDays(Double excessDays) {
-        this.excessDays = excessDays;
-    }
-
-    public Double getLossPercentage() {
-        return lossPercentage;
-    }
-
-    public void setLossPercentage(Double lossPercentage) {
-        this.lossPercentage = lossPercentage;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
-    }
+    public LocalDateTime getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

@@ -5,28 +5,44 @@
 
 package com.example.notificationservice.service;
 
-import com.example.notificationservice.constants.PolicyConstants;
-import com.example.notificationservice.dto.LeaveBalanceResponse;
-import com.example.notificationservice.dto.LeaveTypeBreakdown;
-import com.example.notificationservice.entity.*;
-import com.example.notificationservice.enums.LeaveStatus;
-import com.example.notificationservice.enums.LeaveType;
-import com.example.notificationservice.repository.*;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
-import java.time.LocalDate;
-import java.util.*;
-import java.util.stream.Collectors;
+import com.example.notificationservice.constants.PolicyConstants;
+import com.example.notificationservice.dto.LeaveBalanceResponse;
+import com.example.notificationservice.dto.LeaveTypeBreakdown;
+import com.example.notificationservice.entity.CarryForwardBalance;
+import com.example.notificationservice.entity.CompOffBalance;
+import com.example.notificationservice.entity.Employee;
+import com.example.notificationservice.entity.LeaveAllocation;
+import com.example.notificationservice.entity.LeaveApplication;
+import com.example.notificationservice.enums.LeaveStatus;
+import com.example.notificationservice.enums.LeaveType;
+import com.example.notificationservice.repository.CarryForwardBalanceRepository;
+import com.example.notificationservice.repository.CompOffBalanceRepository;
+import com.example.notificationservice.repository.EmployeeRepository;
+import com.example.notificationservice.repository.LeaveAllocationRepository;
+import com.example.notificationservice.repository.LeaveApplicationRepository;
+import com.example.notificationservice.repository.LossOfPayRecordRepository;
+
+import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
-@Slf4j
 @Transactional(readOnly = true)
 public class LeaveBalanceService {
+
+    private static final Logger log = LoggerFactory.getLogger(LeaveBalanceService.class);
 
     private final EmployeeRepository employeeRepository;
     private final LeaveAllocationRepository allocationRepository;
@@ -43,7 +59,7 @@ public class LeaveBalanceService {
      * Get complete leave balance for employee
      *
      * Calculation Rules:
-     * - Total Allocated = 24 days (VACATION:8 + SICK:6 + CASUAL:6 + PERSONAL:4)
+        * - Total Allocated = 24 days (VACATION:8 + SICK:4 + CASUAL:6 + PERSONAL:4)
      * - CompOff is NOT allocated, it's EARNED separately
      * - Carry Forward is stored in separate table
      * - LOP comes from monthly violations

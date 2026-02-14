@@ -5,26 +5,34 @@
 
 package com.example.notificationservice.controller;
 
+import java.util.List;
+import java.util.Map;
+
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.example.notificationservice.dto.AdminDashboardResponse;
 import com.example.notificationservice.dto.EmployeeDashboardResponse;
 import com.example.notificationservice.dto.TeamMemberBalance;
 import com.example.notificationservice.entity.Employee;
 import com.example.notificationservice.entity.LeaveApplication;
 import com.example.notificationservice.enums.LeaveStatus;
 import com.example.notificationservice.service.DashboardService;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
-import java.util.Map;
+import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequestMapping("/api/dashboard")
 @CrossOrigin(origins = "*")
 @RequiredArgsConstructor
-@Slf4j
 public class DashboardController {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(DashboardController.class);
 
     private final DashboardService dashboardService;
 
@@ -61,14 +69,14 @@ public class DashboardController {
      * GET /api/dashboard/leave-counts/{employeeId}?year=2025
      */
     @GetMapping("/leave-counts/{employeeId}")
-    public ResponseEntity<Map<LeaveStatus, Integer>> getLeaveCountsByStatus(
+    public ResponseEntity<Map<LeaveStatus, Long>> getLeaveCountsByStatus(
             @PathVariable Long employeeId,
             @RequestParam Integer year) {
 
         log.info("📊 [API] GET leave counts: employee={}, year={}", employeeId, year);
 
         try {
-            Map<LeaveStatus, Integer> counts = dashboardService.getLeaveCountsByStatus(employeeId, year);
+            Map<LeaveStatus, Long> counts = dashboardService.getLeaveCountsByStatus(employeeId, year);
             return ResponseEntity.ok(counts);
         } catch (Exception e) {
             log.error("❌ [API] Error getting leave counts: {}", e.getMessage());
@@ -204,16 +212,16 @@ public class DashboardController {
      * GET /api/dashboard/admin/{adminId}
      */
     @GetMapping("/admin/{adminId}")
-    public ResponseEntity<EmployeeDashboardResponse> getAdminDashboard(
+    public ResponseEntity<AdminDashboardResponse> getAdminDashboard(
             @PathVariable Long adminId) {
 
-        log.info("⚙️ [API] GET admin dashboard: {}", adminId);
+        log.info("[API] GET admin dashboard: {}", adminId);
 
         try {
-            EmployeeDashboardResponse response = dashboardService.getAdminDashboard(adminId);
+            AdminDashboardResponse response = dashboardService.getAdminDashboard(adminId);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            log.error("❌ [API] Error getting admin dashboard: {}", e.getMessage());
+            log.error("[API] Error getting admin dashboard: {}", e.getMessage());
             return ResponseEntity.badRequest().build();
         }
     }

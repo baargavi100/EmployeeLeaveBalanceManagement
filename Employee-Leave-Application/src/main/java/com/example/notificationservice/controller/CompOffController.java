@@ -8,7 +8,8 @@ package com.example.notificationservice.controller;
 import com.example.notificationservice.entity.CompOffBalance;
 import com.example.notificationservice.service.CompOffService;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -18,8 +19,9 @@ import java.math.BigDecimal;
 @RequestMapping("/api/comp-off")
 @CrossOrigin(origins = "*")
 @RequiredArgsConstructor
-@Slf4j
 public class CompOffController {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(CompOffController.class);
 
     private final CompOffService compOffService;
 

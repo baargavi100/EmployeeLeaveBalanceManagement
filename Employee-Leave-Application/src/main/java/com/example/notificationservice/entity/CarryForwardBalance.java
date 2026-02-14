@@ -1,22 +1,25 @@
-package com.example.notificationservice.entity;
+// ═══════════════════════════════════════════════════════════════════
+// FILE: CarryForwardBalance.java
+// Location: src/main/java/com/example/notificationservice/entity/
+// ═══════════════════════════════════════════════════════════════════
 
-import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+package com.example.notificationservice.entity;
 
 import java.time.LocalDateTime;
 
-/**
- * Entity: Carry Forward Balance
- * Purpose: Store common carry forward pool (not tied to leave category)
- * Table: carry_forward_balance
- */
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
+import lombok.Data;
+
 @Entity
 @Table(name = "carry_forward_balance")
 @Data
-@NoArgsConstructor
-@AllArgsConstructor
 public class CarryForwardBalance {
 
     @Id
@@ -26,7 +29,7 @@ public class CarryForwardBalance {
     @Column(name = "employee_id", nullable = false)
     private Long employeeId;
 
-    @Column(name = "\"year\"", nullable = false)
+    @Column(name = "carry_year", nullable = false)
     private Integer year;
 
     @Column(name = "total_carried_forward", nullable = false)
@@ -35,7 +38,7 @@ public class CarryForwardBalance {
     @Column(name = "total_used", nullable = false)
     private Double totalUsed = 0.0;
 
-    @Column(name = "remaining", nullable = false)
+    @Column(nullable = false)
     private Double remaining = 0.0;
 
     @Column(name = "created_at")
@@ -54,4 +57,29 @@ public class CarryForwardBalance {
     protected void onUpdate() {
         updatedAt = LocalDateTime.now();
     }
+
+    // Explicit getters and setters
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+
+    public Long getEmployeeId() { return employeeId; }
+    public void setEmployeeId(Long employeeId) { this.employeeId = employeeId; }
+
+    public Integer getYear() { return year; }
+    public void setYear(Integer year) { this.year = year; }
+
+    public Double getTotalCarriedForward() { return totalCarriedForward; }
+    public void setTotalCarriedForward(Double totalCarriedForward) { this.totalCarriedForward = totalCarriedForward; }
+
+    public Double getTotalUsed() { return totalUsed; }
+    public void setTotalUsed(Double totalUsed) { this.totalUsed = totalUsed; }
+
+    public Double getRemaining() { return remaining; }
+    public void setRemaining(Double remaining) { this.remaining = remaining; }
+
+    public LocalDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+
+    public LocalDateTime getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

@@ -9,7 +9,8 @@ import com.example.notificationservice.dto.CarryForwardBalanceResponse;
 import com.example.notificationservice.dto.CarryForwardEligibilityResponse;
 import com.example.notificationservice.service.CarryForwardService;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -20,8 +21,9 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/carryforward")
 @RequiredArgsConstructor
-@Slf4j
 public class CarryForwardController {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(CarryForwardController.class);
 
     private final CarryForwardService carryForwardService;
 

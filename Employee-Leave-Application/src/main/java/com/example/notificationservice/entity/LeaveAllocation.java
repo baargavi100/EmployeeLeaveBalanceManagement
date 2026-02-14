@@ -6,9 +6,17 @@
 
 package com.example.notificationservice.entity;
 
-import jakarta.persistence.*;
-
 import java.time.LocalDateTime;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 @Entity
 @Table(name = "leave_allocation",
@@ -36,7 +44,7 @@ public class LeaveAllocation {
 
     /**
      * Allocated days for this category
-     * VACATION = 8, SICK = 6, CASUAL = 6, PERSONAL = 4
+    * VACATION = 8, SICK = 4, CASUAL = 6, PERSONAL = 4
      */
     @Column(name = "allocated_days", nullable = false)
     private Double allocatedDays = 0.0;

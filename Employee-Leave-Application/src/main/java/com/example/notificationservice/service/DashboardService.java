@@ -1,34 +1,53 @@
 // ═══════════════════════════════════════════════════════════════════
-// FILE: DashboardService.java (REUSABLE for Employee/Manager/HR/Admin)
+// FILE: DashboardService.java (COMPLETE - Reusable for All Roles)
 // Location: src/main/java/com/example/notificationservice/service/
 // ═══════════════════════════════════════════════════════════════════
 
 package com.example.notificationservice.service;
 
-import com.example.notificationservice.constants.PolicyConstants;
-import com.example.notificationservice.dto.EmployeeDashboardResponse;
-import com.example.notificationservice.dto.LeaveTypeBreakdown;
-import com.example.notificationservice.dto.TeamMemberBalance;
-import com.example.notificationservice.entity.*;
-import com.example.notificationservice.enums.LeaveStatus;
-import com.example.notificationservice.enums.LeaveType;
-import com.example.notificationservice.enums.Role;
-import com.example.notificationservice.repository.*;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.util.*;
-import java.util.stream.Collectors;
+import com.example.notificationservice.constants.PolicyConstants;
+import com.example.notificationservice.dto.AdminDashboardResponse;
+import com.example.notificationservice.dto.EmployeeDashboardResponse;
+import com.example.notificationservice.dto.MonthlyStatsResponse;
+import com.example.notificationservice.dto.TeamMemberBalance;
+import com.example.notificationservice.entity.CarryForwardBalance;
+import com.example.notificationservice.entity.CompOffBalance;
+import com.example.notificationservice.entity.Employee;
+import com.example.notificationservice.entity.LeaveAllocation;
+import com.example.notificationservice.entity.LeaveApplication;
+import com.example.notificationservice.enums.LeaveStatus;
+import com.example.notificationservice.enums.Role;
+import com.example.notificationservice.repository.CarryForwardBalanceRepository;
+import com.example.notificationservice.repository.CompOffBalanceRepository;
+import com.example.notificationservice.repository.EmployeeRepository;
+import com.example.notificationservice.repository.LeaveAllocationRepository;
+import com.example.notificationservice.repository.LeaveApplicationRepository;
+import com.example.notificationservice.repository.LossOfPayRecordRepository;
+
+import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
-@Slf4j
 @Transactional(readOnly = true)
 public class DashboardService {
+
+    private static final Logger log = LoggerFactory.getLogger(DashboardService.class);
 
     private final EmployeeRepository employeeRepository;
     private final LeaveAllocationRepository allocationRepository;
@@ -38,17 +57,14 @@ public class DashboardService {
     private final LossOfPayRecordRepository lopRepository;
 
     // ═══════════════════════════════════════════════════════════════
-    // EMPLOYEE DASHBOARD (Also used for Manager/Admin own dashboard)
+    // EMPLOYEE DASHBOARD (Reusable for Employee/Manager/Admin own stats)
     // ═══════════════════════════════════════════════════════════════
 
     /**
      * Get dashboard for any employee
-     * This is reusable for:
-     * - Employee viewing their own dashboard
-     * - Manager viewing their own dashboard
-     * - Admin viewing their own dashboard
+     * Reusable for: Employee, Manager (own stats), Admin (own stats)
      */
-    public EmployeeDashboardResponse getEmployeeDashboard(Long employeeId) {
+    public EmployeeDashboardResponse getDashboard(Long employeeId) {
 
         log.info("📊 [DASHBOARD] Getting employee dashboard: {}", employeeId);
 
@@ -65,7 +81,7 @@ public class DashboardService {
         response.setLastUpdated(LocalDateTime.now());
 
         // ═══════════════════════════════════════════════════════════
-        // 1. YEARLY STATS (Total: 24 days)
+        // 1. YEARLY STATS
         // ═══════════════════════════════════════════════════════════
 
         List<LeaveAllocation> allocations = allocationRepository
@@ -128,7 +144,7 @@ public class DashboardService {
         // ═══════════════════════════════════════════════════════════
 
         CompOffBalance compOff = compOffRepository
-                .findByEmployeeIdAndYear(employeeId, currentYear)
+                .findByEmployeeIdAndLopYear(employeeId, currentYear)
                 .orElse(null);
 
         if (compOff != null) {
@@ -145,46 +161,36 @@ public class DashboardService {
                 .getTotalLossPercentageByEmployeeIdAndYear(employeeId, currentYear);
         response.setLossOfPayPercentage(totalLOP != null ? totalLOP : 0.0);
 
-        // ═══════════════════════════════════════════════════════════
-        // 6. BREAKDOWN BY LEAVE TYPE
-        // ═══════════════════════════════════════════════════════════
-
-        List<LeaveApplication> approvedLeaves = applicationRepository
-                .findByEmployeeIdAndStatusAndYear(
-                        employeeId, LeaveStatus.APPROVED, currentYear);
-
-        Map<LeaveType, List<LeaveApplication>> byType = approvedLeaves.stream()
-                .collect(Collectors.groupingBy(LeaveApplication::getLeaveType));
-
-        List<LeaveTypeBreakdown> breakdown = new ArrayList<>();
-
-        for (LeaveAllocation alloc : allocations) {
-            LeaveType type = LeaveType.valueOf(alloc.getLeaveCategory());
-            double allocated = alloc.getAllocatedDays();
-
-            double used = byType.getOrDefault(type, List.of())
-                    .stream()
-                    .mapToDouble(l -> l.getDays().doubleValue())
-                    .sum();
-
-            breakdown.add(new LeaveTypeBreakdown(
-                    type, allocated, used, allocated - used, 0));
-        }
-
-        // Add COMP_OFF
-        if (compOff != null) {
-            breakdown.add(new LeaveTypeBreakdown(
-                    LeaveType.COMP_OFF,
-                    compOff.getEarned(),
-                    compOff.getUsed(),
-                    compOff.getBalance(),
-                    0
-            ));
-        }
-
-        response.setBreakdown(breakdown);
-
         log.info("✅ [DASHBOARD] Employee dashboard complete");
+
+        return response;
+    }
+
+    /**
+     * Get monthly statistics for an employee
+     */
+    public MonthlyStatsResponse getMonthlyStats(Long employeeId, Integer year, Integer month) {
+
+        log.info("📅 [DASHBOARD] Getting monthly stats: employee={}, year={}, month={}",
+                employeeId, year, month);
+
+        Employee employee = employeeRepository.findById(employeeId)
+                .orElseThrow(() -> new RuntimeException("Employee not found: " + employeeId));
+
+        MonthlyStatsResponse response = new MonthlyStatsResponse();
+        response.setEmployeeId(employeeId);
+        response.setYear(year);
+        response.setMonth(month);
+
+        // Count approved leaves in this month
+        Integer approvedCount = applicationRepository
+                .countApprovedInMonth(employeeId, year, month);
+
+        response.setTotalApprovedCount(approvedCount != null ? approvedCount : 0);
+        response.setExceededLimit(response.getTotalApprovedCount() > PolicyConstants.MONTHLY_LIMIT);
+
+        log.info("✅ [DASHBOARD] Monthly stats: approved={}, exceeded={}",
+                response.getTotalApprovedCount(), response.isExceededLimit());
 
         return response;
     }
@@ -194,11 +200,11 @@ public class DashboardService {
     // ═══════════════════════════════════════════════════════════════
 
     /**
-     * Get team members' leave balance summary for manager
+     * Get team members' leave balance summary
      */
     public List<TeamMemberBalance> getTeamBalances(Long managerId, Integer year) {
 
-        log.info("👥 [DASHBOARD] Getting team balances for manager: {}", managerId);
+        log.info("👥 [DASHBOARD-MANAGER] Getting team balances for manager: {}", managerId);
 
         List<Employee> teamMembers = employeeRepository.findActiveTeamMembers(managerId);
         List<TeamMemberBalance> balances = new ArrayList<>();
@@ -237,29 +243,215 @@ public class DashboardService {
             balances.add(balance);
         }
 
-        log.info("✅ [DASHBOARD] Retrieved {} team member balances", balances.size());
+        log.info("✅ [DASHBOARD-MANAGER] Retrieved {} team member balances", balances.size());
 
         return balances;
+    }
+
+    /**
+     * Get team members currently on leave TODAY
+     */
+    public List<TeamMemberBalance> getTeamMembersOnLeaveToday(Long managerId) {
+
+        log.info("🏖️ [DASHBOARD-MANAGER] Getting team members on leave today for manager: {}", managerId);
+
+        LocalDate today = LocalDate.now();
+        List<Employee> teamMembers = employeeRepository.findActiveTeamMembers(managerId);
+        List<TeamMemberBalance> onLeave = new ArrayList<>();
+
+        for (Employee member : teamMembers) {
+            // Check if employee has approved leave for today
+            List<LeaveApplication> todayLeaves = applicationRepository
+                    .findByEmployeeIdAndStatus(member.getId(), LeaveStatus.APPROVED)
+                    .stream()
+                    .filter(la -> !today.isBefore(la.getStartDate()) &&
+                            !today.isAfter(la.getEndDate()))
+                    .collect(Collectors.toList());
+
+            if (!todayLeaves.isEmpty()) {
+                TeamMemberBalance balance = new TeamMemberBalance();
+                balance.setEmployeeId(member.getId());
+                balance.setEmployeeName(member.getName());
+
+                // Calculate total days on leave
+                double totalDays = todayLeaves.stream()
+                        .mapToDouble(la -> la.getDays().doubleValue())
+                        .sum();
+
+                balance.setTotalUsed(totalDays);
+                onLeave.add(balance);
+            }
+        }
+
+        log.info("✅ [DASHBOARD-MANAGER] {} team members on leave today", onLeave.size());
+
+        return onLeave;
+    }
+
+    /**
+     * Get team leave calendar for next 7 days
+     */
+    public Map<String, List<TeamMemberBalance>> getTeamLeaveCalendar(Long managerId) {
+
+        log.info("📅 [DASHBOARD-MANAGER] Getting team leave calendar for manager: {}", managerId);
+
+        LocalDate today = LocalDate.now();
+        LocalDate endDate = today.plusDays(7);
+
+        List<Employee> teamMembers = employeeRepository.findActiveTeamMembers(managerId);
+        Map<String, List<TeamMemberBalance>> calendar = new LinkedHashMap<>();
+
+        // Initialize dates
+        for (LocalDate date = today; !date.isAfter(endDate); date = date.plusDays(1)) {
+            calendar.put(date.toString(), new ArrayList<>());
+        }
+
+        // Fill calendar
+        for (Employee member : teamMembers) {
+            List<LeaveApplication> approvedLeaves = applicationRepository
+                    .findByEmployeeIdAndStatus(member.getId(), LeaveStatus.APPROVED)
+                    .stream()
+                    .filter(la -> !la.getEndDate().isBefore(today) &&
+                            !la.getStartDate().isAfter(endDate))
+                    .collect(Collectors.toList());
+
+            for (LeaveApplication leave : approvedLeaves) {
+                LocalDate leaveDate = leave.getStartDate();
+                while (!leaveDate.isAfter(leave.getEndDate()) && !leaveDate.isAfter(endDate)) {
+                    if (!leaveDate.isBefore(today)) {
+                        TeamMemberBalance balance = new TeamMemberBalance();
+                        balance.setEmployeeId(member.getId());
+                        balance.setEmployeeName(member.getName());
+
+                        String dateKey = leaveDate.toString();
+                        calendar.get(dateKey).add(balance);
+                    }
+                    leaveDate = leaveDate.plusDays(1);
+                }
+            }
+        }
+
+        log.info("✅ [DASHBOARD-MANAGER] Team leave calendar prepared for 7 days");
+
+        return calendar;
     }
 
     /**
      * Get pending team leave requests count
      */
     public Integer getPendingTeamRequestsCount(Long managerId) {
-        Integer count = applicationRepository.countPendingTeamRequests(managerId);
-        return count != null ? count : 0;
+
+        log.info("🔔 [DASHBOARD-MANAGER] Getting pending team requests count for manager: {}", managerId);
+
+        List<Employee> teamMembers = employeeRepository.findActiveTeamMembers(managerId);
+        int totalPending = 0;
+
+        for (Employee member : teamMembers) {
+            List<LeaveApplication> pending = applicationRepository
+                    .findByEmployeeIdAndStatus(member.getId(), LeaveStatus.PENDING);
+            totalPending += pending.size();
+        }
+
+        log.info("✅ [DASHBOARD-MANAGER] {} pending team requests", totalPending);
+
+        return totalPending;
     }
 
     /**
      * Get pending team leave requests (detailed)
      */
     public List<LeaveApplication> getPendingTeamRequests(Long managerId) {
-        return applicationRepository.findPendingTeamRequests(managerId);
+
+        log.info("📋 [DASHBOARD-MANAGER] Getting pending team requests for manager: {}", managerId);
+
+        List<Employee> teamMembers = employeeRepository.findActiveTeamMembers(managerId);
+        List<LeaveApplication> allPending = new ArrayList<>();
+
+        for (Employee member : teamMembers) {
+            List<LeaveApplication> pending = applicationRepository
+                    .findByEmployeeIdAndStatus(member.getId(), LeaveStatus.PENDING);
+            allPending.addAll(pending);
+        }
+
+        // Sort by created date (oldest first)
+        allPending.sort(Comparator.comparing(LeaveApplication::getCreatedAt));
+
+        log.info("✅ [DASHBOARD-MANAGER] Retrieved {} pending team requests", allPending.size());
+
+        return allPending;
     }
 
     // ═══════════════════════════════════════════════════════════════
     // HR DASHBOARD - Company-wide View
     // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Get company-wide statistics
+     */
+    public Map<String, Object> getCompanyWideStats(Integer year) {
+
+        log.info("📊 [DASHBOARD-HR] Getting company-wide stats for year: {}", year);
+
+        Map<String, Object> stats = new HashMap<>();
+
+        // Total active employees
+        List<Employee> activeEmployees = employeeRepository.findActiveEmployees();
+        stats.put("totalEmployees", activeEmployees.size());
+
+        // Total approved leaves this year
+        int totalApproved = 0;
+        double totalDaysUsed = 0.0;
+
+        for (Employee emp : activeEmployees) {
+            Double used = applicationRepository.getTotalUsedDays(
+                    emp.getId(), LeaveStatus.APPROVED, year);
+            if (used != null) {
+                totalDaysUsed += used;
+                totalApproved++;
+            }
+        }
+
+        stats.put("totalApprovedLeaves", totalApproved);
+        stats.put("totalDaysUsed", totalDaysUsed);
+
+        // Total LOP percentage
+        double totalLOP = 0.0;
+        int lopCount = 0;
+
+        for (Employee emp : activeEmployees) {
+            Double lop = lopRepository.getTotalLossPercentageByEmployeeIdAndYear(
+                    emp.getId(), year);
+            if (lop != null && lop > 0) {
+                totalLOP += lop;
+                lopCount++;
+            }
+        }
+
+        stats.put("totalLopPercentage", lopCount > 0 ? totalLOP / lopCount : 0.0);
+        stats.put("employeesWithLOP", lopCount);
+
+        // Carry forward utilization
+        double cfUsedTotal = 0.0;
+        double cfTotalTotal = 0.0;
+
+        for (Employee emp : activeEmployees) {
+            CarryForwardBalance cf = carryForwardRepository
+                    .findByEmployeeIdAndYear(emp.getId(), year)
+                    .orElse(null);
+
+            if (cf != null) {
+                cfUsedTotal += cf.getTotalUsed();
+                cfTotalTotal += cf.getTotalCarriedForward();
+            }
+        }
+
+        double cfUtilization = (cfTotalTotal > 0) ? (cfUsedTotal / cfTotalTotal * 100) : 0.0;
+        stats.put("carryForwardUtilization", cfUtilization);
+
+        log.info("✅ [DASHBOARD-HR] Company-wide stats calculated");
+
+        return stats;
+    }
 
     /**
      * Get employees currently on leave (today)
@@ -269,22 +461,29 @@ public class DashboardService {
         log.info("🏖️ [DASHBOARD-HR] Getting employees currently on leave");
 
         LocalDate today = LocalDate.now();
-        List<Long> employeeIds = applicationRepository
-                .findEmployeesCurrentlyOnLeave(today);
+        List<Employee> activeEmployees = employeeRepository.findActiveEmployees();
+        List<Employee> onLeave = new ArrayList<>();
 
-        if (employeeIds.isEmpty()) {
-            return Collections.emptyList();
+        for (Employee emp : activeEmployees) {
+            List<LeaveApplication> todayLeaves = applicationRepository
+                    .findByEmployeeIdAndStatus(emp.getId(), LeaveStatus.APPROVED)
+                    .stream()
+                    .filter(la -> !today.isBefore(la.getStartDate()) &&
+                            !today.isAfter(la.getEndDate()))
+                    .collect(Collectors.toList());
+
+            if (!todayLeaves.isEmpty()) {
+                onLeave.add(emp);
+            }
         }
 
-        List<Employee> employees = employeeRepository.findAllById(employeeIds);
+        log.info("✅ [DASHBOARD-HR] {} employees currently on leave", onLeave.size());
 
-        log.info("✅ [DASHBOARD-HR] {} employees currently on leave", employees.size());
-
-        return employees;
+        return onLeave;
     }
 
     /**
-     * Get all managers with upcoming leave (next 7 days)
+     * Get managers with upcoming leave (next 7 days)
      */
     public List<Employee> getManagersWithUpcomingLeave() {
 
@@ -309,14 +508,13 @@ public class DashboardService {
             }
         }
 
-        log.info("✅ [DASHBOARD-HR] {} managers with upcoming leave",
-                managersWithLeave.size());
+        log.info("✅ [DASHBOARD-HR] {} managers with upcoming leave", managersWithLeave.size());
 
         return managersWithLeave;
     }
 
     /**
-     * Get all admins with upcoming leave (next 7 days)
+     * Get admins with upcoming leave (next 7 days)
      */
     public List<Employee> getAdminsWithUpcomingLeave() {
 
@@ -341,22 +539,213 @@ public class DashboardService {
             }
         }
 
-        log.info("✅ [DASHBOARD-HR] {} admins with upcoming leave",
-                adminsWithLeave.size());
+        log.info("✅ [DASHBOARD-HR] {} admins with upcoming leave", adminsWithLeave.size());
 
         return adminsWithLeave;
     }
 
+    /**
+     * Get employees with low leave balance
+     */
+    public List<TeamMemberBalance> getEmployeesWithLowBalance(Integer year, Double threshold) {
+
+        log.info("⚠️ [DASHBOARD-HR] Getting employees with balance < {}", threshold);
+
+        List<Employee> allEmployees = employeeRepository.findActiveEmployees();
+        List<TeamMemberBalance> lowBalance = new ArrayList<>();
+
+        for (Employee emp : allEmployees) {
+            Double allocated = allocationRepository.getTotalAllocatedDays(emp.getId(), year);
+            Double used = applicationRepository.getTotalUsedDays(emp.getId(), LeaveStatus.APPROVED, year);
+
+            if (allocated == null) allocated = 0.0;
+            if (used == null) used = 0.0;
+
+            Double remaining = allocated - used;
+
+            if (remaining < threshold) {
+                TeamMemberBalance balance = new TeamMemberBalance();
+                balance.setEmployeeId(emp.getId());
+                balance.setEmployeeName(emp.getName());
+                balance.setTotalAllocated(allocated);
+                balance.setTotalUsed(used);
+                balance.setTotalRemaining(remaining);
+                lowBalance.add(balance);
+            }
+        }
+
+        log.info("✅ [DASHBOARD-HR] {} employees with low balance", lowBalance.size());
+
+        return lowBalance;
+    }
+
+    /**
+     * Get employees with high LOP
+     */
+    public List<TeamMemberBalance> getEmployeesWithHighLOP(Integer year, Double threshold) {
+
+        log.info("⚠️ [DASHBOARD-HR] Getting employees with LOP > {}", threshold);
+
+        List<Employee> allEmployees = employeeRepository.findActiveEmployees();
+        List<TeamMemberBalance> highLOP = new ArrayList<>();
+
+        for (Employee emp : allEmployees) {
+            Double lop = lopRepository.getTotalLossPercentageByEmployeeIdAndYear(emp.getId(), year);
+
+            if (lop != null && lop > threshold) {
+                TeamMemberBalance balance = new TeamMemberBalance();
+                balance.setEmployeeId(emp.getId());
+                balance.setEmployeeName(emp.getName());
+                balance.setLopPercentage(lop);
+                highLOP.add(balance);
+            }
+        }
+
+        log.info("✅ [DASHBOARD-HR] {} employees with high LOP", highLOP.size());
+
+        return highLOP;
+    }
+
+    /**
+     * Get employees eligible for carry forward
+     */
+    public List<TeamMemberBalance> getCarryForwardEligible(Integer year) {
+
+        log.info("📋 [DASHBOARD-HR] Getting carry forward eligible employees for year: {}", year);
+
+        List<Employee> allEmployees = employeeRepository.findActiveEmployees();
+        List<TeamMemberBalance> eligible = new ArrayList<>();
+
+        for (Employee emp : allEmployees) {
+            Double allocated = allocationRepository.getTotalAllocatedDays(emp.getId(), year);
+            Double used = applicationRepository.getTotalUsedDays(emp.getId(), LeaveStatus.APPROVED, year);
+
+            if (allocated == null) allocated = 0.0;
+            if (used == null) used = 0.0;
+
+            Double balance = allocated - used;
+
+            if (balance > 0) {
+                double eligibleAmount = Math.min(balance, PolicyConstants.MAX_CARRY_FORWARD);
+
+                TeamMemberBalance tmb = new TeamMemberBalance();
+                tmb.setEmployeeId(emp.getId());
+                tmb.setEmployeeName(emp.getName());
+                tmb.setTotalAllocated(allocated);
+                tmb.setTotalUsed(used);
+                tmb.setTotalRemaining(eligibleAmount);
+                eligible.add(tmb);
+            }
+        }
+
+        log.info("✅ [DASHBOARD-HR] {} employees eligible for carry forward", eligible.size());
+
+        return eligible;
+    }
+
+    /**
+     * Alias for getDashboard() - used by controller
+     */
+    public EmployeeDashboardResponse getEmployeeDashboard(Long employeeId) {
+        return getDashboard(employeeId);
+    }
+
     // ═══════════════════════════════════════════════════════════════
-    // ADMIN DASHBOARD
+    // ADMIN DASHBOARD - System Health & Policy Compliance
     // ═══════════════════════════════════════════════════════════════
 
     /**
      * Admin uses same dashboard as employee for their own stats
-     * Plus they can view onboarding pending list (if implemented)
+     * @return AdminDashboardResponse for admin with comprehensive metrics
      */
-    public EmployeeDashboardResponse getAdminDashboard(Long adminId) {
-        return getEmployeeDashboard(adminId);
+    public AdminDashboardResponse getAdminDashboard(Long adminId) {
+        log.info("[DASHBOARD-ADMIN] Building admin dashboard for: {}", adminId);
+        
+        Employee admin = employeeRepository.findById(adminId)
+                .orElseThrow(() -> new RuntimeException("Admin not found: " + adminId));
+        
+        AdminDashboardResponse response = new AdminDashboardResponse();
+        response.setAdminId(adminId);
+        response.setAdminName(admin.getName());
+        response.setCurrentYear(LocalDate.now().getYear());
+        response.setLastUpdated(LocalDateTime.now());
+        
+        return response;
+    }
+
+    /**
+     * Get total pending approvals across all managers
+     */
+    public Integer getTotalPendingApprovals() {
+
+        log.info("🔔 [DASHBOARD-ADMIN] Getting total pending approvals");
+
+        List<LeaveApplication> pending = applicationRepository
+                .findByStatus(LeaveStatus.PENDING);
+
+        log.info("✅ [DASHBOARD-ADMIN] {} total pending approvals", pending.size());
+
+        return pending.size();
+    }
+
+    /**
+     * Get employees exceeding monthly limit
+     */
+    public List<TeamMemberBalance> getEmployeesExceedingMonthlyLimit(Integer year, Integer month) {
+
+        log.info("⚠️ [DASHBOARD-ADMIN] Getting employees exceeding monthly limit for {}/{}", year, month);
+
+        List<Employee> allEmployees = employeeRepository.findActiveEmployees();
+        List<TeamMemberBalance> exceeding = new ArrayList<>();
+
+        for (Employee emp : allEmployees) {
+            Integer approvedCount = applicationRepository
+                    .countApprovedInMonth(emp.getId(), year, month);
+
+            if (approvedCount != null && approvedCount > PolicyConstants.MONTHLY_LIMIT) {
+                TeamMemberBalance balance = new TeamMemberBalance();
+                balance.setEmployeeId(emp.getId());
+                balance.setEmployeeName(emp.getName());
+                balance.setTotalUsed((double) approvedCount);
+                exceeding.add(balance);
+            }
+        }
+
+        log.info("✅ [DASHBOARD-ADMIN] {} employees exceeding monthly limit", exceeding.size());
+
+        return exceeding;
+    }
+
+    /**
+     * Get system health metrics
+     */
+    public Map<String, Object> getSystemHealthMetrics() {
+
+        log.info("🏥 [DASHBOARD-ADMIN] Getting system health metrics");
+
+        Map<String, Object> health = new HashMap<>();
+
+        // Total pending across system
+        health.put("totalPending", getTotalPendingApprovals());
+
+        // Total active employees
+        List<Employee> active = employeeRepository.findActiveEmployees();
+        health.put("totalActiveEmployees", active.size());
+
+        // Employees with data issues (no allocations)
+        int noAllocations = 0;
+        for (Employee emp : active) {
+            List<LeaveAllocation> allocs = allocationRepository
+                    .findByEmployeeIdAndYear(emp.getId(), LocalDate.now().getYear());
+            if (allocs.isEmpty()) {
+                noAllocations++;
+            }
+        }
+        health.put("employeesWithoutAllocations", noAllocations);
+
+        log.info("✅ [DASHBOARD-ADMIN] System health metrics calculated");
+
+        return health;
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -366,19 +755,434 @@ public class DashboardService {
     /**
      * Get leave application counts by status for employee
      */
-    public Map<LeaveStatus, Integer> getLeaveCountsByStatus(Long employeeId, Integer year) {
+    public Map<LeaveStatus, Long> getLeaveCountsByStatus(Long employeeId, Integer year) {
 
-        Map<LeaveStatus, Integer> counts = new HashMap<>();
+        log.info("📊 [DASHBOARD] Getting leave counts by status: employee={}, year={}",
+                employeeId, year);
 
-        counts.put(LeaveStatus.APPROVED,
-                applicationRepository.countByStatus(employeeId, year, LeaveStatus.APPROVED));
-        counts.put(LeaveStatus.PENDING,
-                applicationRepository.countByStatus(employeeId, year, LeaveStatus.PENDING));
-        counts.put(LeaveStatus.REJECTED,
-                applicationRepository.countByStatus(employeeId, year, LeaveStatus.REJECTED));
-        counts.put(LeaveStatus.CANCELLED,
-                applicationRepository.countByStatus(employeeId, year, LeaveStatus.CANCELLED));
+        List<LeaveApplication> allLeaves = applicationRepository
+                .findByEmployeeIdAndYear(employeeId, year);
+
+        Map<LeaveStatus, Long> counts = allLeaves.stream()
+                .collect(Collectors.groupingBy(
+                        LeaveApplication::getStatus,
+                        Collectors.counting()
+                ));
+
+        log.info("✅ [DASHBOARD] Leave counts: {}", counts);
 
         return counts;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // COMPREHENSIVE MANAGER DASHBOARD (NEW)
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Get complete manager dashboard with all stats and team info
+     */
+    @Transactional(readOnly = true)
+    public com.example.notificationservice.dto.ManagerDashboardResponse getManagerDashboard(Long managerId) {
+
+        log.info("👔 [DASHBOARD-MANAGER] Building comprehensive dashboard for manager: {}", managerId);
+
+        Employee manager = employeeRepository.findById(managerId)
+                .orElseThrow(() -> new RuntimeException("Manager not found: " + managerId));
+
+        int currentYear = LocalDate.now().getYear();
+        com.example.notificationservice.dto.ManagerDashboardResponse response =
+                new com.example.notificationservice.dto.ManagerDashboardResponse();
+
+        response.setManagerId(managerId);
+        response.setManagerName(manager.getName());
+        response.setCurrentYear(currentYear);
+
+        // ═══════════════════════════════════════════════════════════
+        // MANAGER'S OWN STATS (same as employee dashboard)
+        // ═══════════════════════════════════════════════════════════
+
+        EmployeeDashboardResponse ownStats = getDashboard(managerId);
+        response.setYearlyAllocated(ownStats.getYearlyAllocated());
+        response.setYearlyUsed(ownStats.getYearlyUsed());
+        response.setYearlyBalance(ownStats.getYearlyBalance());
+        response.setMonthlyAllocated(ownStats.getMonthlyAllocated());
+        response.setMonthlyUsed(ownStats.getMonthlyUsed());
+        response.setMonthlyBalance(ownStats.getMonthlyBalance());
+        response.setCarryForwardBalance(ownStats.getCarryForwardRemaining());
+        response.setCompOffBalance(ownStats.getCompoffBalance());
+        response.setLossOfPayPercentage(ownStats.getLossOfPayPercentage());
+        response.setApprovedCount(ownStats.getApprovedCount());
+        response.setRejectedCount(ownStats.getRejectedCount());
+        response.setPendingCount(ownStats.getPendingCount());
+
+        // ═══════════════════════════════════════════════════════════
+        // TEAM METRICS
+        // ═══════════════════════════════════════════════════════════
+
+        List<Employee> teamMembers = employeeRepository.findActiveTeamMembers(managerId);
+        response.setTeamSize(teamMembers.size());
+
+        // Pending team requests
+        List<LeaveApplication> pendingRequests = applicationRepository.findPendingTeamRequests(managerId);
+        response.setTeamPendingRequestCount(pendingRequests.size());
+
+        // Prepare pending team request DTOs
+        List<com.example.notificationservice.dto.ManagerDashboardResponse.TeamPendingLeaveDTO> pendingDTOs
+                = new ArrayList<>();
+        for (LeaveApplication leave : pendingRequests) {
+            Employee emp = employeeRepository.findById(leave.getEmployeeId()).orElse(null);
+            if (emp != null) {
+                var dto = new com.example.notificationservice.dto.ManagerDashboardResponse.TeamPendingLeaveDTO(
+                        leave.getId(),
+                        leave.getEmployeeId(),
+                        emp.getName(),
+                        leave.getLeaveType().name(),
+                        leave.getReason(),
+                        leave.getStartDate(),
+                        leave.getEndDate(),
+                        leave.getDays().doubleValue(),
+                        leave.getCreatedAt()
+                );
+                pendingDTOs.add(dto);
+            }
+        }
+        response.setPendingTeamRequests(pendingDTOs);
+
+        // ═══════════════════════════════════════════════════════════
+        // TEAM MEMBERS ON LEAVE TODAY
+        // ═══════════════════════════════════════════════════════════
+
+        LocalDate today = LocalDate.now();
+        List<com.example.notificationservice.dto.ManagerDashboardResponse.TeamMemberOnLeaveDTO> onLeaveDTOs
+                = new ArrayList<>();
+
+        for (Employee member : teamMembers) {
+            List<LeaveApplication> todayLeaves = applicationRepository
+                    .findByEmployeeIdAndStatus(member.getId(), LeaveStatus.APPROVED)
+                    .stream()
+                    .filter(la -> !today.isBefore(la.getStartDate()) && !today.isAfter(la.getEndDate()))
+                    .collect(Collectors.toList());
+
+            if (!todayLeaves.isEmpty()) {
+                for (LeaveApplication leave : todayLeaves) {
+                    long daysRemaining = ChronoUnit.DAYS.between(today, leave.getEndDate());
+                    var dto = new com.example.notificationservice.dto.ManagerDashboardResponse.TeamMemberOnLeaveDTO(
+                            member.getId(),
+                            member.getName(),
+                            leave.getLeaveType().name(),
+                            leave.getStartDate(),
+                            leave.getEndDate(),
+                            (double) daysRemaining
+                    );
+                    onLeaveDTOs.add(dto);
+                }
+            }
+        }
+
+        response.setTeamOnLeaveToday(onLeaveDTOs);
+        response.setTeamOnLeaveCount(onLeaveDTOs.size());
+        response.setLastUpdated(LocalDateTime.now());
+
+        log.info("✅ [DASHBOARD-MANAGER] Manager dashboard complete");
+        return response;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // COMPREHENSIVE HR DASHBOARD (NEW)
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Get complete HR dashboard with company-wide metrics
+     */
+    @Transactional(readOnly = true)
+    public com.example.notificationservice.dto.HRDashboardResponse getHRDashboard() {
+
+        log.info("🏢 [DASHBOARD-HR] Building comprehensive HR dashboard");
+
+        int currentYear = LocalDate.now().getYear();
+        com.example.notificationservice.dto.HRDashboardResponse response =
+                new com.example.notificationservice.dto.HRDashboardResponse();
+
+        response.setCurrentYear(currentYear);
+
+        // ═══════════════════════════════════════════════════════════
+        // COMPANY-WIDE METRICS
+        // ═══════════════════════════════════════════════════════════
+
+        List<Employee> activeEmployees = employeeRepository.findByActiveTrue();
+        response.setTotalEmployees(activeEmployees.size());
+        response.setActiveEmployees(activeEmployees.size());
+
+        // Employees on leave today
+        LocalDate today = LocalDate.now();
+        List<Long> onLeaveTodayIds = applicationRepository.findEmployeesCurrentlyOnLeave(today);
+        response.setEmployeesOnLeaveToday(onLeaveTodayIds.size());
+
+        // Total pending and approved
+        List<LeaveApplication> pending = applicationRepository.findByStatus(LeaveStatus.PENDING);
+        response.setTotalPendingLeaves(pending.size());
+
+        // Total approved (all employees, this year)
+        int approvedCount = 0;
+        for (Employee emp : activeEmployees) {
+            List<LeaveApplication> approved = applicationRepository
+                    .findByEmployeeIdAndStatusAndYear(emp.getId(), LeaveStatus.APPROVED, currentYear);
+            approvedCount += approved.size();
+        }
+        response.setTotalApprovedLeaves(approvedCount);
+
+        // ═══════════════════════════════════════════════════════════
+        // ONBOARDING STATUS
+        // ═══════════════════════════════════════════════════════════
+
+        List<Employee> onboardingPending = employeeRepository.findOnboardingPending();
+        response.setNewEmployeesCount(onboardingPending.size());
+        response.setPendingBiometricCount(employeeRepository.countPendingBiometric());
+        response.setPendingVPNCount(employeeRepository.countPendingVPN());
+
+        // Prepare onboarding pending DTOs
+        List<com.example.notificationservice.dto.HRDashboardResponse.OnboardingPendingDTO> onboardingDTOs
+                = new ArrayList<>();
+        for (Employee emp : onboardingPending) {
+            int daysInOnboarding = (int) ChronoUnit.DAYS.between(emp.getJoiningDate(), LocalDate.now());
+            var dto = new com.example.notificationservice.dto.HRDashboardResponse.OnboardingPendingDTO(
+                    emp.getId(),
+                    emp.getName(),
+                    emp.getEmail(),
+                    emp.getJoiningDate(),
+                    emp.getBiometricStatus(),
+                    emp.getVpnStatus(),
+                    daysInOnboarding
+            );
+            onboardingDTOs.add(dto);
+        }
+        response.setOnboardingPendingList(onboardingDTOs);
+
+        // ═══════════════════════════════════════════════════════════
+        // EMPLOYEES ON LEAVE
+        // ═══════════════════════════════════════════════════════════
+
+        List<LeaveApplication> leavesInRange = applicationRepository
+                .findApprovedLeavesInDateRange(today, today);
+
+        List<com.example.notificationservice.dto.HRDashboardResponse.EmployeeOnLeaveDTO> onLeaveDTOs
+                = new ArrayList<>();
+
+        for (LeaveApplication leave : leavesInRange) {
+            Employee emp = employeeRepository.findById(leave.getEmployeeId()).orElse(null);
+            if (emp != null) {
+                Employee manager = emp.getManagerId() != null ?
+                        employeeRepository.findById(emp.getManagerId()).orElse(null) : null;
+
+                Employee approver = leave.getApprovedBy() != null ?
+                        employeeRepository.findById(leave.getApprovedBy()).orElse(null) : null;
+
+                var dto = new com.example.notificationservice.dto.HRDashboardResponse.EmployeeOnLeaveDTO(
+                        emp.getId(),
+                        emp.getName(),
+                        manager != null ? manager.getName() : "N/A",
+                        leave.getLeaveType().name(),
+                        leave.getStartDate(),
+                        leave.getEndDate(),
+                        leave.getDays().doubleValue(),
+                        leave.getApprovedAt() != null ? leave.getApprovedAt().toLocalDate() : null,
+                        approver != null ? approver.getName() : "N/A"
+                );
+                onLeaveDTOs.add(dto);
+            }
+        }
+        response.setEmployeesOnLeave(onLeaveDTOs);
+
+        // ═══════════════════════════════════════════════════════════
+        // MANAGER INSIGHTS
+        // ═══════════════════════════════════════════════════════════
+
+        List<Long> managerIds = applicationRepository.findManagersWhoApprovedLeaves(currentYear);
+        response.setTotalManagersWithApprovals(managerIds.size());
+
+        List<com.example.notificationservice.dto.HRDashboardResponse.ManagerApprovalStatsDTO> managerStats
+                = new ArrayList<>();
+
+        for (Long mgrId : managerIds) {
+            Employee mgr = employeeRepository.findById(mgrId).orElse(null);
+            if (mgr != null) {
+                List<Employee> teamMembers = employeeRepository.findTeamMembersByManager(mgrId);
+                List<LeaveApplication> managerApprovals = applicationRepository
+                        .findLeavesApprovedByManager(mgrId, currentYear);
+
+                // Count pending from his team
+                int teamPending = 0;
+                for (Employee tm : teamMembers) {
+                    List<LeaveApplication> tmPending = applicationRepository
+                            .findByEmployeeIdAndStatus(tm.getId(), LeaveStatus.PENDING);
+                    teamPending += tmPending.size();
+                }
+
+                int approvalRate = teamMembers.size() > 0 ?
+                        (int) ((managerApprovals.size() / (double) teamMembers.size()) * 100) : 0;
+
+                LocalDateTime lastApproval = managerApprovals.isEmpty() ? null :
+                        managerApprovals.get(0).getApprovedAt();
+
+                var stats = new com.example.notificationservice.dto.HRDashboardResponse.ManagerApprovalStatsDTO(
+                        mgrId,
+                        mgr.getName(),
+                        teamMembers.size(),
+                        managerApprovals.size(),
+                        teamPending,
+                        approvalRate,
+                        lastApproval != null ? lastApproval.toLocalDate() : null
+                );
+                managerStats.add(stats);
+            }
+        }
+        response.setManagerApprovalStats(managerStats);
+
+        // ═══════════════════════════════════════════════════════════
+        // TEAM STRUCTURE
+        // ═══════════════════════════════════════════════════════════
+
+        List<Employee> allManagers = employeeRepository.findAllManagers();
+        List<com.example.notificationservice.dto.HRDashboardResponse.TeamStructureDTO> teamStructure
+                = new ArrayList<>();
+
+        for (Employee manager : allManagers) {
+            List<Employee> teamMembers = employeeRepository.findTeamMembersByManager(manager.getId());
+
+            List<com.example.notificationservice.dto.HRDashboardResponse.TeamMemberDTO> teamMemberDTOs
+                    = new ArrayList<>();
+
+            for (Employee member : teamMembers) {
+                Double yearlyBal = allocationRepository.getTotalAllocatedDays(member.getId(), currentYear);
+                Double yearlyUsed = applicationRepository.getTotalUsedDays(member.getId(), LeaveStatus.APPROVED, currentYear);
+                
+                CarryForwardBalance cf = carryForwardRepository
+                        .findByEmployeeIdAndYear(member.getId(), currentYear).orElse(null);
+                Double cfBal = cf != null ? cf.getRemaining() : 0.0;
+
+                CompOffBalance compOff = compOffRepository
+                        .findByEmployeeIdAndYear(member.getId(), currentYear).orElse(null);
+                Double compOffBal = compOff != null ? compOff.getBalance() : 0.0;
+
+                var memberDTO = new com.example.notificationservice.dto.HRDashboardResponse.TeamMemberDTO(
+                        member.getId(),
+                        member.getName(),
+                        member.getEmail(),
+                        (yearlyBal != null ? yearlyBal : 0.0) - (yearlyUsed != null ? yearlyUsed : 0.0),
+                        cfBal,
+                        compOffBal
+                );
+                teamMemberDTOs.add(memberDTO);
+            }
+
+            var teamStruct = new com.example.notificationservice.dto.HRDashboardResponse.TeamStructureDTO(
+                    manager.getId(),
+                    manager.getName(),
+                    teamMembers.size(),
+                    teamMemberDTOs
+            );
+            teamStructure.add(teamStruct);
+        }
+        response.setTeamStructure(teamStructure);
+        response.setLastUpdated(LocalDateTime.now());
+
+        log.info("✅ [DASHBOARD-HR] HR dashboard complete");
+        return response;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // COMPREHENSIVE ADMIN DASHBOARD (NEW)
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Get complete admin dashboard with compliance metrics
+     */
+    @Transactional(readOnly = true)
+    public com.example.notificationservice.dto.AdminDashboardResponse getComprehensiveAdminDashboard(Long adminId) {
+
+        log.info("⚙️ [DASHBOARD-ADMIN] Building comprehensive admin dashboard for: {}", adminId);
+
+        Employee admin = employeeRepository.findById(adminId)
+                .orElseThrow(() -> new RuntimeException("Admin not found: " + adminId));
+
+        int currentYear = LocalDate.now().getYear();
+        com.example.notificationservice.dto.AdminDashboardResponse response =
+                new com.example.notificationservice.dto.AdminDashboardResponse();
+
+        response.setCurrentYear(currentYear);
+        response.setAdminId(adminId);
+        response.setAdminName(admin.getName());
+
+        // ═══════════════════════════════════════════════════════════
+        // ADMIN'S OWN STATS
+        // ═══════════════════════════════════════════════════════════
+
+        EmployeeDashboardResponse ownStats = getDashboard(adminId);
+        response.setYearlyBalance(ownStats.getYearlyBalance());
+        response.setCarryForwardBalance(ownStats.getCarryForwardRemaining());
+        response.setCompOffBalance(ownStats.getCompoffBalance());
+        response.setApprovedLeaveCount(ownStats.getApprovedCount());
+        response.setPendingLeaveCount(ownStats.getPendingCount());
+
+        // ═══════════════════════════════════════════════════════════
+        // COMPLIANCE METRICS
+        // ═══════════════════════════════════════════════════════════
+
+        List<Employee> allEmployees = employeeRepository.findByActiveTrue();
+        response.setTotalEmployees(allEmployees.size());
+
+        List<Employee> managers = employeeRepository.findByRole(Role.MANAGER);
+        response.setTotalManagers(managers.size());
+
+        // Onboarding pending
+        List<Employee> onboardingPending = employeeRepository.findOnboardingPending();
+        response.setNewEmployeeesPendingOnboarding(onboardingPending.size());
+
+        // Pending leaves
+        List<LeaveApplication> pending = applicationRepository.findByStatus(LeaveStatus.PENDING);
+        response.setTotalPendingLeaves(pending.size());
+
+        // Rejected leaves
+        List<LeaveApplication> rejected = applicationRepository.findByStatus(LeaveStatus.REJECTED);
+        response.setTotalRejectedLeaves(rejected.size());
+
+        // ═══════════════════════════════════════════════════════════
+        // LEAVE STATISTICS
+        // ═══════════════════════════════════════════════════════════
+
+        double totalUsedYTD = 0.0;
+        double totalCFBalance = 0.0;
+        double totalCompOffBalance = 0.0;
+        double totalLOP = 0.0;
+        int lopCount = 0;
+
+        for (Employee emp : allEmployees) {
+            Double used = applicationRepository.getTotalUsedDays(emp.getId(), LeaveStatus.APPROVED, currentYear);
+            if (used != null) totalUsedYTD += used;
+
+            CarryForwardBalance cf = carryForwardRepository
+                    .findByEmployeeIdAndYear(emp.getId(), currentYear).orElse(null);
+            if (cf != null) totalCFBalance += cf.getRemaining();
+
+            CompOffBalance compOff = compOffRepository
+                    .findByEmployeeIdAndYear(emp.getId(), currentYear).orElse(null);
+            if (compOff != null) totalCompOffBalance += compOff.getBalance();
+
+            Double lop = lopRepository.getTotalLossPercentageByEmployeeIdAndYear(emp.getId(), currentYear);
+            if (lop != null && lop > 0) {
+                totalLOP += lop;
+                lopCount++;
+            }
+        }
+
+        response.setTotalLeaveDaysUsedYTD(totalUsedYTD);
+        response.setTotalCarryForwardBalance(totalCFBalance);
+        response.setTotalCompOffBalance(totalCompOffBalance);
+        response.setAverageLossOfPayPercentage(lopCount > 0 ? totalLOP / lopCount : 0.0);
+
+        response.setLastUpdated(LocalDateTime.now());
+
+        log.info("✅ [DASHBOARD-ADMIN] AdminDashboard complete");
+        return response;
     }
 }

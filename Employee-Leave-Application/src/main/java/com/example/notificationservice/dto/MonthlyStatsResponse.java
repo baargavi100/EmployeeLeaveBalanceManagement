@@ -72,6 +72,10 @@ public class MonthlyStatsResponse {
         return exceededLimit;
     }
 
+    public Boolean isExceededLimit() {
+        return exceededLimit;
+    }
+
     public void setExceededLimit(Boolean exceededLimit) {
         this.exceededLimit = exceededLimit;
     }
